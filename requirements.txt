@@ -1,0 +1,14 @@
+# Core NLP / PII detection
+presidio-analyzer>=2.0
+presidio-anonymizer>=2.0
+spacy>=3.7
+
+# Streamlit app
+streamlit>=1.38
+pandas>=2.2
+plotly>=5.22
+openpyxl>=3.1
+
+# Integrations (optional — needed only for real Jira/Confluence connections)
+atlassian-python-api>=3.19
+jira>=3.5

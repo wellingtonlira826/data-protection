@@ -1,0 +1,110 @@
+[build-system]
+requires = ["setuptools>=74.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "data-protection-plugins"
+version = "2.0.0"
+description = "Plugins de integração Jira e Confluence para a plataforma Presidio PT — detecção e conformidade de dados pessoais (PII)."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11, <3.15"
+authors = [
+    {name = "Data Protection Team", email = "data-protection@empresa.com.br"}
+]
+keywords = [
+    "pii", "data-protection", "presidio", "lgpd", "gdpr",
+    "jira", "confluence", "compliance", "ai-security"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Law :: Legal Software",
+]
+dependencies = [
+    "presidio-analyzer>=2.0",
+    "presidio-anonymizer>=2.0",
+    "spacy>=3.7",
+    "pt_core_news_lg>=1.4",
+    "atlassian-python-api>=3.19",
+    "jira>=3.5",
+    "typing-extensions>=4.10; python_version < '3.13'",
+]
+
+[project.optional-dependencies]
+streamlit = [
+    "streamlit>=1.38",
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "plotly>=5.22",
+]
+dev = [
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/empresa/data-protection"
+Documentation = "https://github.com/empresa/data-protection#readme"
+Repository = "https://github.com/empresa/data-protection.git"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["plugins*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [".git", ".pytest_cache", "__pycache__", ".streamlit", ".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "C4", "DTZ", "ISC", "ICN", "RET", "RUF"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+show_error_codes = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "--cov=plugins --cov-report=term-missing --cov-report=html"
+
+[tool.coverage.run]
+source = ["plugins"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "len\\(self\\._parts\\) == 0",
+]
