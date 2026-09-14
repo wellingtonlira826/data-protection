@@ -125,29 +125,54 @@ class JiraPlugin:
             logger.exception("Erro inesperado ao conectar Jira: %s", exc)
             return ConnResult(ok=False, message=msg)
 
-    def listar_projetos(self, max_results: int = 200, com_contagem: bool = True) -> list[dict]:
-        """Lista projetos acessíveis, opcionalmente com contagem de issues (paralelo)."""
+    def listar_projetos(self, max_results: int = 0, com_contagem: bool = True) -> list[dict]:
+        """Lista projetos acessíveis, opcionalmente com contagem de issues (paralelo).
+
+        max_results: 0 = sem limite (todos os projetos acessíveis).
+        """
         if not self._client:
             logger.warning("Não conectado ao listar projetos")
             return []
         try:
             from concurrent.futures import ThreadPoolExecutor
-            projs = self._client.projects()[:max_results]
+
+            # Paginação via /project/search (Jira Cloud) com fallback para Server
+            raw: list[dict] = []
+            page_size = 50
+            start = 0
+            try:
+                while True:
+                    data = self._client._get_json(
+                        "project/search",
+                        params={"startAt": start, "maxResults": page_size},
+                    )
+                    batch = data.get("values", [])
+                    raw.extend(batch)
+                    if data.get("isLast", True) or len(batch) < page_size:
+                        break
+                    start += page_size
+            except Exception:
+                # Fallback Jira Server: /project retorna todos sem paginação
+                server_projs = self._client.projects()
+                raw = [{"key": p.key, "name": p.name} for p in server_projs]
+
+            if max_results:
+                raw = raw[:max_results]
 
             if not com_contagem:
-                return [{"key": p.key, "name": p.name, "count": -1} for p in projs]
+                return [{"key": p["key"], "name": p["name"], "count": -1} for p in raw]
 
-            def _contar(proj):
+            def _contar(p: dict):
                 try:
                     r = self._client.search_issues(
-                        f'project = "{proj.key}"', maxResults=0, fields="summary"
+                        f'project = "{p["key"]}"', maxResults=0, fields="summary"
                     )
-                    return {"key": proj.key, "name": proj.name, "count": r.total}
+                    return {"key": p["key"], "name": p["name"], "count": r.total}
                 except Exception:
-                    return {"key": proj.key, "name": proj.name, "count": -1}
+                    return {"key": p["key"], "name": p["name"], "count": -1}
 
-            with ThreadPoolExecutor(max_workers=min(8, len(projs) or 1)) as ex:
-                results = list(ex.map(_contar, projs))
+            with ThreadPoolExecutor(max_workers=min(8, len(raw) or 1)) as ex:
+                results = list(ex.map(_contar, raw))
 
             return sorted(results, key=lambda x: x.get("count", 0), reverse=True)
         except Exception:
