@@ -11,6 +11,9 @@ from __future__ import annotations
 import logging
 from typing import Any, TypedDict
 
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 from atlassian import Confluence
 from html.parser import HTMLParser
 
@@ -109,6 +112,7 @@ class ConfluencePlugin:
                     username=usuario,
                     password=token,
                     cloud=cloud,
+                    verify_ssl=cloud,
                 )
             else:
                 # Server/DC: PAT (Personal Access Token)
@@ -116,6 +120,7 @@ class ConfluencePlugin:
                     url=self._base_url,
                     token=token,
                     cloud=False,
+                    verify_ssl=False,
                 )
             conexao = self._client.get_spaces(limit=1)
             results = (

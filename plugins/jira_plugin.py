@@ -11,6 +11,9 @@ from __future__ import annotations
 import logging
 from typing import Any, TypedDict, TYPE_CHECKING
 
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 from jira import JIRA
 from jira.exceptions import JIRAError
 
@@ -93,12 +96,14 @@ class JiraPlugin:
                 self._client = JIRA(
                     server=self._base_url,
                     basic_auth=(usuario, token),
+                    options={"verify": False},
                 )
             else:
                 # Server/DC: PAT (Personal Access Token) — Jira Server 8.14+ / Data Center
                 self._client = JIRA(
                     server=self._base_url,
                     token_auth=token,
+                    options={"verify": False},
                 )
             me = self._client.myself()
             display_name = me.get("displayName", usuario or "usuario")
