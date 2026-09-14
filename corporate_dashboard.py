@@ -1504,18 +1504,24 @@ elif pagina == "Varredura Jira":
                 for r in _res_jira if r.total_deteccoes > 0 and r.chunk.get("issue_key")
             })
 
-            # ── Filtros ───────────────────────────────────────────────────
+            # Tipos detectados apenas de issues que realmente têm PII
+            _todos_tipos = sorted({
+                d.entidade
+                for r in _res_jira
+                if r.total_deteccoes > 0
+                for d in r.deteccoes
+            })
+
+            # ── Filtros — sempre renderizados (mesmo sem detecções) ────────
             sec_hdr("Filtros")
             _fc1, _fc2, _fc3 = st.columns([3, 2, 2], gap="large")
             with _fc1:
-                _todos_tipos = sorted({
-                    d.entidade for r in _res_jira for d in r.deteccoes
-                })
                 _tipo_filtro: list[str] = st.multiselect(
-                    "Tipo de dado",
+                    f"Tipo de dado ({len(_todos_tipos)} detectados)" if _todos_tipos else "Tipo de dado",
                     _todos_tipos,
                     key="acoes_tipo_filtro",
-                    placeholder="Todos os tipos",
+                    placeholder="Todos os tipos" if _todos_tipos else "Rode o scan para ver os tipos",
+                    disabled=not _todos_tipos,
                 )
             with _fc2:
                 _alvo = st.radio(
@@ -1526,9 +1532,17 @@ elif pagina == "Varredura Jira":
             with _fc3:
                 _conf_min = st.slider(
                     "Confianca minima (%)",
-                    min_value=0, max_value=100, value=50, step=5,
+                    min_value=0, max_value=100, value=0, step=5,
                     key="acoes_conf_min",
                     help="Deteccoes abaixo deste limiar sao ignoradas (falsos positivos)",
+                )
+
+            if not _issues_detectadas:
+                st.markdown(
+                    f'<p style="font-size:13px;color:{TMU};margin-top:8px;">'
+                    'Nenhuma deteccao encontrada no ultimo scan Jira. '
+                    'Execute a varredura na aba Scan com dados que contenham PII.</p>',
+                    unsafe_allow_html=True,
                 )
 
             # Funcao auxiliar: deteccoes de um card respeitando filtros
