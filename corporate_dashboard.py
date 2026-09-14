@@ -1495,143 +1495,301 @@ elif pagina == "Varredura Jira":
                 unsafe_allow_html=True,
             )
         else:
+            # Cache de permissoes por card {issue_key: True/False/None}
+            if "acoes_permissoes" not in st.session_state:
+                st.session_state.acoes_permissoes = {}
+
             _issues_detectadas = sorted({
                 r.chunk.get("issue_key", "")
                 for r in _res_jira if r.total_deteccoes > 0 and r.chunk.get("issue_key")
             })
 
-            # ── Tabela de issues ──────────────────────────────────────────
-            sec_hdr("Cards com Deteccoes")
-            _linhas_issues = []
+            # ── Filtros ───────────────────────────────────────────────────
+            sec_hdr("Filtros")
+            _fc1, _fc2, _fc3 = st.columns([3, 2, 2], gap="large")
+            with _fc1:
+                _todos_tipos = sorted({
+                    d.entidade for r in _res_jira for d in r.deteccoes
+                })
+                _tipo_filtro: list[str] = st.multiselect(
+                    "Tipo de dado",
+                    _todos_tipos,
+                    key="acoes_tipo_filtro",
+                    placeholder="Todos os tipos",
+                )
+            with _fc2:
+                _alvo = st.radio(
+                    "Nivel de risco",
+                    ["Qualquer deteccao", "Apenas HIGH ou SECRET"],
+                    key="jira_action_alvo",
+                )
+            with _fc3:
+                _conf_min = st.slider(
+                    "Confianca minima (%)",
+                    min_value=0, max_value=100, value=50, step=5,
+                    key="acoes_conf_min",
+                    help="Deteccoes abaixo deste limiar sao ignoradas (falsos positivos)",
+                )
+
+            # Funcao auxiliar: deteccoes de um card respeitando filtros
+            def _dets_filtradas(resultados):
+                out = []
+                for _r in resultados:
+                    for _d in _r.deteccoes:
+                        if _tipo_filtro and _d.entidade not in _tipo_filtro:
+                            continue
+                        if _d.confianca * 100 < _conf_min:
+                            continue
+                        out.append((_r, _d))
+                return out
+
+            # Aplica filtro de risco e tipo nas issues
+            _issues_filtradas = []
             for _ik in _issues_detectadas:
                 _cr = [r for r in _res_jira if r.chunk.get("issue_key") == _ik]
-                _linhas_issues.append({
-                    "Card": _ik,
-                    "Deteccoes": sum(r.total_deteccoes for r in _cr),
-                    "Alto": "Sim" if any(r.tem_high for r in _cr) else "",
-                    "Secret": "Sim" if any(r.tem_secret for r in _cr) else "",
-                })
-            st.dataframe(pd.DataFrame(_linhas_issues), use_container_width=True, hide_index=True)
+                _df = _dets_filtradas(_cr)
+                if not _df:
+                    continue
+                if _alvo == "Apenas HIGH ou SECRET" and not any(
+                    _d.nivel == "HIGH" or _d.is_secret for _, _d in _df
+                ):
+                    continue
+                _issues_filtradas.append(_ik)
 
-            # ── Verificacao de permissao ──────────────────────────────────
-            sec_hdr("Verificar Permissao de Edicao")
             st.markdown(
-                f'<p style="font-size:12px;color:{TM};margin-bottom:8px;">'
-                'Antes de aplicar qualquer acao de escrita, confirme que seu token tem permissao de edicao no card.</p>',
+                f'<p style="font-size:12px;color:{TM};margin:4px 0 12px;">'
+                f'{len(_issues_filtradas)} cards com deteccoes (de {len(_issues_detectadas)} total)'
+                f'{"  —  filtro ativo" if _tipo_filtro or _conf_min > 0 else ""}</p>',
                 unsafe_allow_html=True,
             )
-            _col_perm_sel, _col_perm_btn = st.columns([3, 2])
-            with _col_perm_sel:
-                _issue_check = st.selectbox(
-                    "Selecione um card para testar",
-                    _issues_detectadas[:20] if _issues_detectadas else ["—"],
-                    key="jira_perm_issue",
-                    disabled=not _is_real_ac,
-                )
-            with _col_perm_btn:
-                st.markdown("<div style='height:22px'></div>", unsafe_allow_html=True)
+
+            # ── Verificar permissao em todos ──────────────────────────────
+            _cp1, _cp2, _ = st.columns([2, 2, 3], gap="small")
+            with _cp1:
                 if st.button(
-                    "Verificar permissao" if _is_real_ac else "Indisponivel no demo",
-                    key="btn_check_perm",
+                    "Verificar permissao em todos" if _is_real_ac else "Indisponivel no demo",
+                    key="btn_perm_all",
                     disabled=not _is_real_ac,
                     use_container_width=True,
                 ):
-                    _perm = _jp.actions.checar_permissao(_issue_check)
-                    if _perm["pode_editar"]:
-                        st.success(f"Permissao confirmada para {_issue_check}: {_perm['mensagem']}")
-                    else:
-                        st.warning(f"Sem permissao em {_issue_check}: {_perm['mensagem']}")
+                    with st.spinner(f"Verificando {len(_issues_filtradas[:30])} cards..."):
+                        for _ik in _issues_filtradas[:30]:
+                            try:
+                                _p = _jp.actions.checar_permissao(_ik)
+                                st.session_state.acoes_permissoes[_ik] = _p["pode_editar"]
+                            except Exception:
+                                st.session_state.acoes_permissoes[_ik] = False
+                    st.rerun()
+            with _cp2:
+                if st.button("Limpar cache de permissoes", key="btn_perm_clear", use_container_width=True):
+                    st.session_state.acoes_permissoes = {}
+                    st.rerun()
 
-            # ── Escopo e execucao ─────────────────────────────────────────
-            sec_hdr("Escopo e Execucao")
-            _col_esc, _col_exec = st.columns([2, 3])
-            with _col_esc:
-                _alvo = st.radio(
-                    "Aplicar em",
-                    ["Apenas cards com HIGH ou SECRET", "Todos os cards com deteccoes"],
-                    key="jira_action_alvo",
-                    disabled=not _is_real_ac,
-                )
-            with _col_exec:
-                if _modo_atual == "scrub":
-                    st.markdown(f"""
-                    <div style="background:{RBG};border:1px solid {RD};border-radius:8px;
-                      padding:12px 16px;margin-bottom:10px;">
-                      <div style="font-size:12px;font-weight:700;color:{RD};margin-bottom:4px;">
-                        Atencao: Acao Irreversivel
-                      </div>
-                      <div style="font-size:11.5px;color:{TM};line-height:1.5;">
-                        O scrubbing altera o texto diretamente no Jira. O dado original sera perdido.
-                        Carregue o preview antes de aplicar.
-                      </div>
-                    </div>
-                    """, unsafe_allow_html=True)
+            # ── Cards expandiveis com deteccoes e acoes por card ──────────
+            sec_hdr("Cards com Deteccoes")
 
-                    _issue_scrub = st.selectbox(
-                        "Card para preview do scrubbing",
-                        _issues_detectadas[:20],
-                        key="jira_scrub_issue",
-                        disabled=not _is_real_ac,
-                    )
-                    if st.button("Carregar Preview do Scrubbing", key="btn_scrub_preview",
-                                 disabled=not _is_real_ac, use_container_width=True):
-                        _chunks_issue = [r for r in _res_jira if r.chunk.get("issue_key") == _issue_scrub]
-                        _prev = _jp.actions.scrub_preview(_issue_scrub, _chunks_issue)
-                        st.session_state.scrub_preview = _prev
-                        st.session_state.scrub_issue_selecionada = _issue_scrub
+            if not _issues_filtradas:
+                st.info("Nenhum card corresponde aos filtros selecionados.")
+            else:
+                for _ik in _issues_filtradas[:60]:
+                    _cr = [r for r in _res_jira if r.chunk.get("issue_key") == _ik]
+                    _df = _dets_filtradas(_cr)
+                    _tipos_card = sorted({_d.entidade for _, _d in _df})
+                    _tem_high = any(_d.nivel == "HIGH" for _, _d in _df)
+                    _tem_secret = any(_d.is_secret for _, _d in _df)
+                    _perm_status = st.session_state.acoes_permissoes.get(_ik)
 
-                    if st.session_state.scrub_preview and st.session_state.scrub_issue_selecionada == (_issue_scrub if _is_real_ac else ""):
-                        sec_hdr(f"Preview — {st.session_state.scrub_issue_selecionada}")
-                        for _pv in st.session_state.scrub_preview:
-                            st.markdown(f"**Campo:** {_pv['campo']}  |  Entidades: {', '.join(_pv['entidades'])}")
-                            _pv_c1, _pv_c2 = st.columns(2, gap="medium")
-                            _pv_c1.markdown(f'<div style="font-size:11px;color:{TM};margin-bottom:2px;font-weight:600;">ANTES</div>'
-                                            f'<div class="anon-panel" style="min-height:60px;max-height:120px;">{_pv["antes"]}</div>',
-                                            unsafe_allow_html=True)
-                            _pv_c2.markdown(f'<div style="font-size:11px;color:{GD};margin-bottom:2px;font-weight:600;">DEPOIS (scrubbed)</div>'
-                                            f'<div class="anon-panel" style="min-height:60px;max-height:120px;border-color:{GD}40;">{_pv["depois"]}</div>',
-                                            unsafe_allow_html=True)
+                    # Label do expander com resumo
+                    _risco_tag = " [HIGH]" if _tem_high else (" [SECRET]" if _tem_secret else "")
+                    _tipos_str = ", ".join(_tipos_card[:4])
+                    if len(_tipos_card) > 4:
+                        _tipos_str += f" +{len(_tipos_card)-4}"
+                    _perm_tag = "" if _perm_status is None else (" [SEM PERMISSAO]" if not _perm_status else " [PERMISSAO OK]")
+                    _exp_label = f"{_ik}{_risco_tag} — {len(_df)} deteccoes — {_tipos_str}{_perm_tag}"
 
-                        _confirmar = st.checkbox(
-                            "Entendi que esta acao e irreversivel e quero aplicar o scrubbing",
-                            key="scrub_confirma",
-                        )
-                        if st.button("Aplicar Scrubbing Agora", key="btn_scrub_aplicar",
-                                     disabled=not (_is_real_ac and _confirmar), use_container_width=True):
-                            _chunks_scrub = [r for r in _res_jira if r.chunk.get("issue_key") == st.session_state.scrub_issue_selecionada]
-                            _acs = _jp.actions.scrub_aplicar(st.session_state.scrub_issue_selecionada, _chunks_scrub)
-                            for _ar in _acs:
-                                if _ar["ok"]:
-                                    st.success(f"{_ar['acao']}: {_ar['mensagem']}")
-                                else:
-                                    st.error(f"{_ar['acao']}: {_ar['mensagem']}")
-                else:
-                    if st.button(
-                        "Aplicar Acoes" if _is_real_ac else "Indisponivel no demo",
-                        key="btn_apply_actions",
-                        disabled=not _is_real_ac,
-                        use_container_width=True,
-                    ):
-                        _ts_now = datetime.now(timezone.utc).isoformat()
-                        _erros: list[str] = []
-                        _ok_count = 0
-                        with st.status("Aplicando acoes...", expanded=True) as _sts:
-                            for _ik in _issues_detectadas:
-                                _cr = [r for r in _res_jira if r.chunk.get("issue_key") == _ik]
-                                if _alvo.startswith("Apenas") and not any(r.tem_high or r.tem_secret for r in _cr):
-                                    continue
-                                for _ar in _jp.actions.aplicar(_ik, _cr, _ts_now, _modo_atual):
-                                    if _ar["ok"]:
-                                        _ok_count += 1
-                                        st.write(f"{_ik}: {_ar['mensagem']}")
-                                    else:
-                                        _erros.append(f"{_ik}: {_ar['mensagem']}")
-                            _sts.update(
-                                label=f"Concluido — {_ok_count} operacoes.",
-                                state="complete" if not _erros else "error",
+                    with st.expander(_exp_label, expanded=False):
+
+                        # Status de permissao
+                        if _perm_status is False:
+                            st.warning(
+                                "Sem permissao de edicao neste card. "
+                                "Verifique se seu token tem permissao de escrita no projeto. "
+                                "Acoes de escrita serao bloqueadas."
                             )
-                        for _e in _erros[:5]:
-                            st.error(_e)
+                        elif _perm_status is True:
+                            st.success("Permissao de edicao confirmada.")
+
+                        # Tabela de deteccoes
+                        _linhas_det = []
+                        for _r, _d in _df:
+                            _linhas_det.append({
+                                "Campo": _r.chunk.get("campo", "—"),
+                                "Tipo de Dado": _d.entidade,
+                                "Valor (mascarado)": _d.valor_display,
+                                "Nivel": _d.nivel,
+                                "Confianca": f"{_d.confianca:.0%}",
+                                "Secret": "Sim" if _d.is_secret else "",
+                            })
+                        st.dataframe(
+                            pd.DataFrame(_linhas_det),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+
+                        # Botoes por card
+                        _bc1, _bc2, _bc3 = st.columns(3, gap="small")
+
+                        with _bc1:
+                            if st.button(
+                                "Verificar permissao",
+                                key=f"perm_{_ik}",
+                                disabled=not _is_real_ac,
+                                use_container_width=True,
+                            ):
+                                try:
+                                    _p = _jp.actions.checar_permissao(_ik)
+                                    st.session_state.acoes_permissoes[_ik] = _p["pode_editar"]
+                                    if _p["pode_editar"]:
+                                        st.success(_p["mensagem"])
+                                    else:
+                                        st.warning(_p["mensagem"])
+                                except Exception as _pe:
+                                    st.error(f"Erro ao verificar: {_pe}")
+                                    st.session_state.acoes_permissoes[_ik] = False
+                                st.rerun()
+
+                        with _bc2:
+                            if _modo_atual == "scrub":
+                                if st.button(
+                                    "Carregar Preview",
+                                    key=f"preview_{_ik}",
+                                    disabled=not _is_real_ac,
+                                    use_container_width=True,
+                                ):
+                                    _chunks_ik = [r for r in _res_jira if r.chunk.get("issue_key") == _ik]
+                                    _prev = _jp.actions.scrub_preview(_ik, _chunks_ik)
+                                    st.session_state.scrub_preview = _prev
+                                    st.session_state.scrub_issue_selecionada = _ik
+                                    st.rerun()
+
+                        with _bc3:
+                            _can_write = _is_real_ac and (_perm_status is not False)
+                            _btn_label_card = (
+                                "Aplicar Scrub" if _modo_atual == "scrub"
+                                else "Corrigir Este Card"
+                            )
+                            if _modo_atual != "scrub":
+                                if st.button(
+                                    _btn_label_card if _can_write else "Sem permissao",
+                                    key=f"apply_{_ik}",
+                                    disabled=not _can_write,
+                                    use_container_width=True,
+                                    type="primary",
+                                ):
+                                    _ts_now = datetime.now(timezone.utc).isoformat()
+                                    with st.status(f"Aplicando em {_ik}...", expanded=True):
+                                        _ok_c, _err_c = 0, []
+                                        for _ar in _jp.actions.aplicar(_ik, _cr, _ts_now, _modo_atual):
+                                            if _ar["ok"]:
+                                                _ok_c += 1
+                                                st.write(f"{_ar['acao']}: {_ar['mensagem']}")
+                                            else:
+                                                _err_c.append(_ar["mensagem"])
+                                        for _em in _err_c:
+                                            st.error(_em)
+
+                        # Preview de scrub para este card
+                        if (
+                            _modo_atual == "scrub"
+                            and st.session_state.scrub_preview
+                            and st.session_state.scrub_issue_selecionada == _ik
+                        ):
+                            st.markdown(f"""
+                            <div style="background:{RBG};border:1px solid {RD};border-radius:8px;
+                              padding:10px 14px;margin:10px 0 6px;">
+                              <span style="font-size:11.5px;font-weight:700;color:{RD};">
+                                ATENCAO: Scrubbing e irreversivel — o texto original sera perdido.
+                              </span>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                            for _pv in st.session_state.scrub_preview:
+                                st.markdown(
+                                    f"**Campo:** {_pv['campo']}  |  "
+                                    f"Entidades: {', '.join(_pv['entidades'])}"
+                                )
+                                _pv_c1, _pv_c2 = st.columns(2, gap="medium")
+                                _pv_c1.markdown(
+                                    f'<div style="font-size:11px;color:{TM};margin-bottom:2px;'
+                                    f'font-weight:600;">ANTES</div>'
+                                    f'<div class="anon-panel" style="min-height:60px;'
+                                    f'max-height:120px;">{_pv["antes"]}</div>',
+                                    unsafe_allow_html=True,
+                                )
+                                _pv_c2.markdown(
+                                    f'<div style="font-size:11px;color:{GD};margin-bottom:2px;'
+                                    f'font-weight:600;">DEPOIS (scrubbed)</div>'
+                                    f'<div class="anon-panel" style="min-height:60px;'
+                                    f'max-height:120px;border-color:{GD}40;">{_pv["depois"]}</div>',
+                                    unsafe_allow_html=True,
+                                )
+
+                            _confirmar = st.checkbox(
+                                "Entendi que esta acao e irreversivel",
+                                key=f"scrub_confirma_{_ik}",
+                            )
+                            if st.button(
+                                "Aplicar Scrubbing Agora",
+                                key=f"scrub_aplicar_{_ik}",
+                                disabled=not (_can_write and _confirmar),
+                                use_container_width=True,
+                                type="primary",
+                            ):
+                                _chunks_scrub = [r for r in _res_jira if r.chunk.get("issue_key") == _ik]
+                                for _ar in _jp.actions.scrub_aplicar(_ik, _chunks_scrub):
+                                    if _ar["ok"]:
+                                        st.success(f"{_ar['acao']}: {_ar['mensagem']}")
+                                    else:
+                                        st.error(f"{_ar['acao']}: {_ar['mensagem']}")
+
+            # ── Acao em massa ─────────────────────────────────────────────
+            if _issues_filtradas and _modo_atual != "scrub":
+                st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+                sec_hdr("Acao em Massa")
+                st.markdown(
+                    f'<p style="font-size:12px;color:{TM};margin-bottom:8px;">'
+                    f'Aplica o modo <b>{_MODO_INFO[_modo_atual]["titulo"]}</b> em todos os '
+                    f'{len(_issues_filtradas)} cards filtrados de uma vez.</p>',
+                    unsafe_allow_html=True,
+                )
+                if st.button(
+                    "Aplicar em Todos os Cards Filtrados" if _is_real_ac else "Indisponivel no demo",
+                    key="btn_apply_all",
+                    disabled=not _is_real_ac,
+                    use_container_width=False,
+                ):
+                    _ts_now = datetime.now(timezone.utc).isoformat()
+                    _erros_bulk: list[str] = []
+                    _ok_bulk = 0
+                    with st.status("Aplicando acoes...", expanded=True) as _sts:
+                        for _ik in _issues_filtradas:
+                            _cr = [r for r in _res_jira if r.chunk.get("issue_key") == _ik]
+                            _perm = st.session_state.acoes_permissoes.get(_ik)
+                            if _perm is False:
+                                _erros_bulk.append(f"{_ik}: sem permissao de edicao (pulado)")
+                                continue
+                            for _ar in _jp.actions.aplicar(_ik, _cr, _ts_now, _modo_atual):
+                                if _ar["ok"]:
+                                    _ok_bulk += 1
+                                    st.write(f"{_ik}: {_ar['mensagem']}")
+                                else:
+                                    _erros_bulk.append(f"{_ik}: {_ar['mensagem']}")
+                        _sts.update(
+                            label=f"Concluido — {_ok_bulk} operacoes.",
+                            state="complete" if not _erros_bulk else "error",
+                        )
+                    for _e in _erros_bulk[:10]:
+                        st.error(_e)
 
     # ── Agendamentos ──────────────────────────────────────────────────────────
     with tab_agend:
