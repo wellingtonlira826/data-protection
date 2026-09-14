@@ -20,6 +20,14 @@ os.environ.setdefault("JIRA_INTERNAL_EVENTS_ENABLED", "false")
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from plugins.email_plugin import (
+    GraphEmailPlugin,
+    PLACEHOLDERS as EMAIL_PLACEHOLDERS,
+    carregar_templates,
+    salvar_templates,
+    preencher_template,
+    variaveis_de_chunks,
+)
 
 st.set_page_config(
     page_title="Data Protection | PII & Secrets Scanner",
@@ -253,6 +261,11 @@ def _init_state() -> None:
         "acoes_modo": "readonly",       # modo selecionado na aba Acoes
         "scrub_preview": [],            # lista de preview por issue
         "scrub_issue_selecionada": "",
+        # Email (Microsoft Graph)
+        "graph_token": "",
+        "graph_me": None,               # {"nome": str, "email": str} após validação
+        "email_templates": None,        # carregado lazy do arquivo JSON
+        "email_dest_padrao": "",        # destinatário padrão persistido na sessão
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -1494,6 +1507,112 @@ elif pagina == "Varredura Jira":
         _modo_atual = st.session_state.acoes_modo
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
+        # ── Configuracoes de Email (Microsoft Graph) ──────────────────────
+        with st.expander("Configuracoes de Email (Microsoft Graph)", expanded=False):
+            # Lazy load templates
+            if st.session_state.email_templates is None:
+                st.session_state.email_templates = carregar_templates()
+
+            _em_c1, _em_c2 = st.columns([3, 1], gap="medium")
+            with _em_c1:
+                _token_input = st.text_input(
+                    "Token Microsoft Graph (validade ~1h)",
+                    value=st.session_state.graph_token,
+                    type="password",
+                    placeholder="Cole aqui o Bearer token do Graph Explorer",
+                    key="graph_token_input",
+                )
+                if _token_input != st.session_state.graph_token:
+                    st.session_state.graph_token = _token_input
+                    st.session_state.graph_me = None
+
+                _dest_input = st.text_input(
+                    "Destinatario padrao",
+                    value=st.session_state.email_dest_padrao,
+                    placeholder="admin@empresa.com",
+                    key="email_dest_input",
+                    help="Email pre-preenchido nos formularios de envio. Editavel por card.",
+                )
+                if _dest_input != st.session_state.email_dest_padrao:
+                    st.session_state.email_dest_padrao = _dest_input
+
+            with _em_c2:
+                st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+                if st.button("Validar Token", key="btn_validar_token", use_container_width=True):
+                    if not st.session_state.graph_token:
+                        st.warning("Cole o token antes de validar.")
+                    else:
+                        _gp = GraphEmailPlugin(st.session_state.graph_token)
+                        _vr = _gp.verificar_token()
+                        if _vr["ok"]:
+                            st.session_state.graph_me = {"nome": _vr["nome"], "email": _vr["email"]}
+                            st.success(_vr["mensagem"])
+                        else:
+                            st.session_state.graph_me = None
+                            st.error(_vr["mensagem"])
+
+            if st.session_state.graph_me:
+                st.markdown(
+                    f'<p style="font-size:12px;color:{GD};margin:2px 0 12px;">'
+                    f'Autenticado como <b>{st.session_state.graph_me["nome"]}</b> '
+                    f'({st.session_state.graph_me["email"]})</p>',
+                    unsafe_allow_html=True,
+                )
+
+            # ── Gerenciamento de templates ─────────────────────────────────
+            st.markdown(
+                f'<div style="font-size:13px;font-weight:700;color:{TD};'
+                f'margin:14px 0 6px;">Templates de Email</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f'<p style="font-size:11.5px;color:{TM};margin-bottom:8px;">'
+                f'Placeholders disponiveis: '
+                + " ".join(f'<code>{p}</code>' for p, _ in EMAIL_PLACEHOLDERS)
+                + "</p>",
+                unsafe_allow_html=True,
+            )
+
+            _tpls = st.session_state.email_templates
+            _tpl_nomes = [t["nome"] for t in _tpls]
+
+            # Editar templates existentes
+            for _ti, _tpl in enumerate(_tpls):
+                with st.expander(f"Template: {_tpl['nome']}", expanded=False):
+                    _t_nome = st.text_input("Nome", value=_tpl["nome"], key=f"tpl_nome_{_ti}")
+                    _t_assunto = st.text_input("Assunto", value=_tpl["assunto"], key=f"tpl_assunto_{_ti}")
+                    _t_corpo = st.text_area("Corpo (HTML)", value=_tpl["corpo"], height=200, key=f"tpl_corpo_{_ti}")
+                    _tc1, _tc2 = st.columns(2, gap="small")
+                    with _tc1:
+                        if st.button("Salvar alteracoes", key=f"tpl_salvar_{_ti}", use_container_width=True):
+                            _tpls[_ti] = {"nome": _t_nome, "assunto": _t_assunto, "corpo": _t_corpo}
+                            salvar_templates(_tpls)
+                            st.session_state.email_templates = _tpls
+                            st.success("Template salvo.")
+                            st.rerun()
+                    with _tc2:
+                        if st.button("Excluir template", key=f"tpl_del_{_ti}", use_container_width=True):
+                            _tpls.pop(_ti)
+                            salvar_templates(_tpls)
+                            st.session_state.email_templates = _tpls
+                            st.rerun()
+
+            # Novo template
+            with st.expander("+ Adicionar novo template", expanded=False):
+                _nt_nome = st.text_input("Nome do template", key="novo_tpl_nome")
+                _nt_assunto = st.text_input("Assunto", key="novo_tpl_assunto")
+                _nt_corpo = st.text_area("Corpo (HTML)", height=160, key="novo_tpl_corpo",
+                                         placeholder="<p>Prezado(a),</p><p>...</p>")
+                if st.button("Adicionar Template", key="btn_add_tpl", use_container_width=False):
+                    if _nt_nome and _nt_assunto:
+                        _tpls.append({"nome": _nt_nome, "assunto": _nt_assunto, "corpo": _nt_corpo})
+                        salvar_templates(_tpls)
+                        st.session_state.email_templates = _tpls
+                        st.success(f"Template '{_nt_nome}' adicionado.")
+                        st.rerun()
+                    else:
+                        st.warning("Preencha pelo menos nome e assunto.")
+
         # ── Sem resultados ainda ──────────────────────────────────────────
         if not _res_jira:
             st.markdown(
@@ -1729,6 +1848,90 @@ elif pagina == "Varredura Jira":
                                         for _em in _err_c:
                                             st.error(_em)
 
+                        # Botao de email por card
+                        _tem_graph = bool(st.session_state.graph_token)
+                        _email_key = f"show_email_{_ik}"
+                        if _email_key not in st.session_state:
+                            st.session_state[_email_key] = False
+
+                        _bem_c1, _bem_c2 = st.columns([1, 3], gap="small")
+                        with _bem_c1:
+                            if st.button(
+                                "Enviar Email",
+                                key=f"btn_email_{_ik}",
+                                disabled=not _tem_graph,
+                                use_container_width=True,
+                                help="Requer token Graph configurado acima" if not _tem_graph else "",
+                            ):
+                                st.session_state[_email_key] = not st.session_state[_email_key]
+
+                        # Formulario de email inline
+                        if st.session_state[_email_key] and _tem_graph:
+                            _tpls_email = st.session_state.email_templates or []
+                            _tpl_nomes_email = [t["nome"] for t in _tpls_email]
+                            _ef1, _ef2 = st.columns([2, 2], gap="medium")
+                            with _ef1:
+                                _sel_tpl = st.selectbox(
+                                    "Template",
+                                    _tpl_nomes_email,
+                                    key=f"email_tpl_{_ik}",
+                                )
+                                _dest_card = st.text_input(
+                                    "Para",
+                                    value=st.session_state.email_dest_padrao,
+                                    key=f"email_dest_{_ik}",
+                                    placeholder="destinatario@empresa.com",
+                                )
+                                _cc_card = st.text_input(
+                                    "CC (opcional)",
+                                    key=f"email_cc_{_ik}",
+                                    placeholder="outro@empresa.com",
+                                )
+                            with _ef2:
+                                _data_str = datetime.now(timezone.utc).strftime("%d/%m/%Y")
+                                _solicitante = (
+                                    st.session_state.graph_me["email"]
+                                    if st.session_state.graph_me
+                                    else "Data Protection Scanner"
+                                )
+                                _vars_email = variaveis_de_chunks(
+                                    _ik, _cr,
+                                    solicitante=_solicitante,
+                                    data=_data_str,
+                                )
+                                _tpl_obj = next(
+                                    (t for t in _tpls_email if t["nome"] == _sel_tpl),
+                                    _tpls_email[0] if _tpls_email else {},
+                                )
+                                _filled = preencher_template(_tpl_obj, _vars_email)
+                                st.markdown(
+                                    f'<div style="font-size:11px;color:{TM};margin-bottom:2px;'
+                                    f'font-weight:600;">Preview do assunto</div>'
+                                    f'<div style="font-size:12px;padding:4px 8px;background:{BPW};'
+                                    f'border-radius:4px;border:1px solid {BOR};">'
+                                    f'{_filled["assunto"]}</div>',
+                                    unsafe_allow_html=True,
+                                )
+                            if st.button(
+                                "Enviar Agora",
+                                key=f"email_enviar_{_ik}",
+                                type="primary",
+                                disabled=not _dest_card.strip(),
+                            ):
+                                _gp_send = GraphEmailPlugin(st.session_state.graph_token)
+                                _cc_list = [c.strip() for c in _cc_card.split(",") if c.strip()]
+                                _res_email = _gp_send.enviar(
+                                    para=[_dest_card.strip()],
+                                    assunto=_filled["assunto"],
+                                    corpo_html=_filled["corpo"],
+                                    cc=_cc_list or None,
+                                )
+                                if _res_email["ok"]:
+                                    st.success(_res_email["mensagem"])
+                                    st.session_state[_email_key] = False
+                                else:
+                                    st.error(_res_email["mensagem"])
+
                         # Para scrub sem permissão verificada: instrução clara
                         if _modo_atual == "scrub" and _perm_status is None:
                             st.info(
@@ -1803,44 +2006,130 @@ elif pagina == "Varredura Jira":
                                 st.session_state.scrub_preview = []
                                 st.session_state.scrub_issue_selecionada = None
 
-            # ── Acao em massa ─────────────────────────────────────────────
-            if _issues_filtradas and _modo_atual != "scrub":
+            # ── Acoes em Massa ────────────────────────────────────────────
+            if _issues_filtradas:
                 st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-                sec_hdr("Acao em Massa")
-                st.markdown(
-                    f'<p style="font-size:12px;color:{TM};margin-bottom:8px;">'
-                    f'Aplica o modo <b>{_MODO_INFO[_modo_atual]["titulo"]}</b> em todos os '
-                    f'{len(_issues_filtradas)} cards filtrados de uma vez.</p>',
-                    unsafe_allow_html=True,
-                )
-                if st.button(
-                    "Aplicar em Todos os Cards Filtrados" if _is_real_ac else "Indisponivel no demo",
-                    key="btn_apply_all",
-                    disabled=not _is_real_ac,
-                    use_container_width=False,
-                ):
-                    _ts_now = datetime.now(timezone.utc).isoformat()
-                    _erros_bulk: list[str] = []
-                    _ok_bulk = 0
-                    with st.status("Aplicando acoes...", expanded=True) as _sts:
-                        for _ik in _issues_filtradas:
-                            _cr = [r for r in _res_jira if r.chunk.get("issue_key") == _ik]
-                            _perm = st.session_state.acoes_permissoes.get(_ik)
-                            if _perm is False:
-                                _erros_bulk.append(f"{_ik}: sem permissao de edicao (pulado)")
-                                continue
-                            for _ar in _jp.actions.aplicar(_ik, _cr, _ts_now, _modo_atual):
-                                if _ar["ok"]:
-                                    _ok_bulk += 1
-                                    st.write(f"{_ik}: {_ar['mensagem']}")
-                                else:
-                                    _erros_bulk.append(f"{_ik}: {_ar['mensagem']}")
-                        _sts.update(
-                            label=f"Concluido — {_ok_bulk} operacoes.",
-                            state="complete" if not _erros_bulk else "error",
+                sec_hdr("Acoes em Massa")
+
+                _bm_c1, _bm_c2 = st.columns(2, gap="large")
+
+                # ── Correcao em massa ──────────────────────────────────────
+                with _bm_c1:
+                    st.markdown(
+                        f'<p style="font-size:12px;color:{TM};margin-bottom:8px;">'
+                        f'Aplica o modo <b>{_MODO_INFO[_modo_atual]["titulo"]}</b> em todos os '
+                        f'{len(_issues_filtradas)} cards filtrados.</p>',
+                        unsafe_allow_html=True,
+                    )
+                    if _modo_atual == "scrub":
+                        st.info("Correcao em massa indisponivel no modo Scrub — aplique card a card.", icon="ℹ️")
+                    else:
+                        if st.button(
+                            "Aplicar Correcao em Todos" if _is_real_ac else "Indisponivel no demo",
+                            key="btn_apply_all",
+                            disabled=not _is_real_ac,
+                            use_container_width=True,
+                        ):
+                            _ts_now = datetime.now(timezone.utc).isoformat()
+                            _erros_bulk: list[str] = []
+                            _ok_bulk = 0
+                            with st.status("Aplicando correcoes...", expanded=True) as _sts:
+                                for _ik in _issues_filtradas:
+                                    _cr = [r for r in _res_jira if r.chunk.get("issue_key") == _ik]
+                                    _perm = st.session_state.acoes_permissoes.get(_ik)
+                                    if _perm is False:
+                                        _erros_bulk.append(f"{_ik}: sem permissao (pulado)")
+                                        continue
+                                    for _ar in _jp.actions.aplicar(_ik, _cr, _ts_now, _modo_atual):
+                                        if _ar["ok"]:
+                                            _ok_bulk += 1
+                                            st.write(f"{_ik}: {_ar['mensagem']}")
+                                        else:
+                                            _erros_bulk.append(f"{_ik}: {_ar['mensagem']}")
+                                _sts.update(
+                                    label=f"Concluido — {_ok_bulk} operacoes.",
+                                    state="complete" if not _erros_bulk else "error",
+                                )
+                            for _e in _erros_bulk[:10]:
+                                st.error(_e)
+
+                # ── Email em massa ─────────────────────────────────────────
+                with _bm_c2:
+                    _tem_graph_bulk = bool(st.session_state.graph_token)
+                    _tpls_bulk = st.session_state.email_templates or []
+                    st.markdown(
+                        f'<p style="font-size:12px;color:{TM};margin-bottom:8px;">'
+                        f'Envia email para {len(_issues_filtradas)} cards filtrados usando '
+                        f'um unico template e destinatario.</p>',
+                        unsafe_allow_html=True,
+                    )
+                    if not _tem_graph_bulk:
+                        st.info("Configure o token Graph na secao acima para habilitar.", icon="ℹ️")
+                    else:
+                        _tpl_nomes_bulk = [t["nome"] for t in _tpls_bulk]
+                        _bulk_tpl = st.selectbox(
+                            "Template para envio em massa",
+                            _tpl_nomes_bulk,
+                            key="bulk_email_tpl",
+                        ) if _tpl_nomes_bulk else None
+                        _bulk_dest = st.text_input(
+                            "Destinatario (todos os cards)",
+                            value=st.session_state.email_dest_padrao,
+                            key="bulk_email_dest",
+                            placeholder="admin@empresa.com",
                         )
-                    for _e in _erros_bulk[:10]:
-                        st.error(_e)
+                        _bulk_cc = st.text_input(
+                            "CC (opcional)",
+                            key="bulk_email_cc",
+                            placeholder="outro@empresa.com",
+                        )
+                        if st.button(
+                            f"Enviar Email para {len(_issues_filtradas)} Cards",
+                            key="btn_email_all",
+                            disabled=not (_bulk_dest.strip() and _bulk_tpl),
+                            use_container_width=True,
+                            type="primary",
+                        ):
+                            _gp_bulk = GraphEmailPlugin(st.session_state.graph_token)
+                            _solicitante_bulk = (
+                                st.session_state.graph_me["email"]
+                                if st.session_state.graph_me else "Data Protection Scanner"
+                            )
+                            _tpl_obj_bulk = next(
+                                (t for t in _tpls_bulk if t["nome"] == _bulk_tpl), {}
+                            )
+                            _cc_bulk = [c.strip() for c in _bulk_cc.split(",") if c.strip()]
+                            _data_bulk = datetime.now(timezone.utc).strftime("%d/%m/%Y")
+                            _email_ok_bulk, _email_err_bulk = 0, []
+                            with st.status(
+                                f"Enviando emails para {len(_issues_filtradas)} cards...",
+                                expanded=True,
+                            ) as _em_sts:
+                                for _ik in _issues_filtradas:
+                                    _cr_b = [r for r in _res_jira if r.chunk.get("issue_key") == _ik]
+                                    _vars_b = variaveis_de_chunks(
+                                        _ik, _cr_b,
+                                        solicitante=_solicitante_bulk,
+                                        data=_data_bulk,
+                                    )
+                                    _filled_b = preencher_template(_tpl_obj_bulk, _vars_b)
+                                    _res_b = _gp_bulk.enviar(
+                                        para=[_bulk_dest.strip()],
+                                        assunto=_filled_b["assunto"],
+                                        corpo_html=_filled_b["corpo"],
+                                        cc=_cc_bulk or None,
+                                    )
+                                    if _res_b["ok"]:
+                                        _email_ok_bulk += 1
+                                        st.write(f"{_ik}: enviado")
+                                    else:
+                                        _email_err_bulk.append(f"{_ik}: {_res_b['mensagem']}")
+                                _em_sts.update(
+                                    label=f"Concluido — {_email_ok_bulk}/{len(_issues_filtradas)} emails enviados.",
+                                    state="complete" if not _email_err_bulk else "error",
+                                )
+                            for _ee in _email_err_bulk[:10]:
+                                st.error(_ee)
 
     # ── Agendamentos ──────────────────────────────────────────────────────────
     with tab_agend:

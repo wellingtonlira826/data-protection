@@ -12,3 +12,4 @@ openpyxl>=3.1
 # Integrations (optional — needed only for real Jira/Confluence connections)
 atlassian-python-api>=3.19
 jira>=3.5
+requests>=2.31
