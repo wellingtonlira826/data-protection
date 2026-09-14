@@ -206,6 +206,7 @@ class ConfluencePlugin:
         desde: str = "",
         page_size: int = 50,
         max_total: int = 0,
+        cql_extra: str = "",
     ) -> list[dict[str, Any]]:
         """Busca páginas com paginação completa.
 
@@ -217,6 +218,7 @@ class ConfluencePlugin:
             desde: Filtro incremental por data de modificação (YYYY-MM-DD).
             page_size: Quantidade de páginas por requisição (padrão 50).
             max_total: Limite total de páginas retornadas (0 = sem limite).
+            cql_extra: CQL adicional (ex: pesquisa dirigida) — adicionado com AND.
         """
         if not self._client:
             raise RuntimeError("ConfluencePlugin não está conectado.")
@@ -235,7 +237,9 @@ class ConfluencePlugin:
             cql_parts.append(f'status = "{status}"')
         if desde:
             cql_parts.append(f'lastModified >= "{desde}"')
-        cql = " AND ".join(cql_parts) + " ORDER BY lastModified ASC"
+        if cql_extra.strip():
+            cql_parts.append(f"({cql_extra.strip()})")
+        cql = " AND ".join(cql_parts) + " ORDER BY lastModified ASC" if cql_parts else "type = page ORDER BY lastModified ASC"
         _espaco_log = space_key if isinstance(space_key, str) else ", ".join(space_key or ["todos"])
 
         all_pages: list[dict[str, Any]] = []

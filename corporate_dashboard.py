@@ -1362,6 +1362,45 @@ elif pagina == "Varredura Jira":
 
         st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
         sec_hdr("Opcoes de Varredura")
+
+        # ── Modo de busca ──────────────────────────────────────────────────
+        from plugins.pesquisas import PESQUISAS_DIRIGIDAS, montar_query_dirigida
+
+        _modo_busca_jira = st.radio(
+            "Modo de busca",
+            ["Varredura Completa", "Pesquisa Dirigida"],
+            horizontal=True,
+            key="jira_modo_busca",
+            help="Varredura Completa escaneia todas as issues dos projetos. "
+                 "Pesquisa Dirigida pre-filtra por padroes especificos (muito mais rapido).",
+        )
+
+        _jql_dirigida = ""
+        if _modo_busca_jira == "Pesquisa Dirigida":
+            st.markdown(
+                f'<p style="font-size:12px;color:{TM};margin:4px 0 8px;">'
+                'Selecione os padroes — o Jira filtra as issues antes do Presidio rodar.</p>',
+                unsafe_allow_html=True,
+            )
+            _sel_pesquisas_jira = st.multiselect(
+                "Padroes de busca",
+                options=[p["nome"] for p in PESQUISAS_DIRIGIDAS],
+                format_func=lambda n: f"{n} — {next(p['descricao'] for p in PESQUISAS_DIRIGIDAS if p['nome']==n)}",
+                default=["Bearer / Auth tokens", "API Keys", "Senhas e Secrets"],
+                key="jira_pesquisas_sel",
+            )
+            _jql_custom_jira = st.text_input(
+                "JQL adicional (opcional)",
+                placeholder='text ~ "minha_chave" OR text ~ "outro_padrao"',
+                key="jira_jql_custom",
+            )
+            _jql_dirigida = montar_query_dirigida(_sel_pesquisas_jira, _jql_custom_jira)
+            if _jql_dirigida:
+                with st.expander("Preview JQL combinado", expanded=False):
+                    st.code(_jql_dirigida, language="sql")
+            else:
+                st.warning("Selecione ao menos um padrao ou informe um JQL customizado.")
+
         _col1, _col2 = st.columns(2)
         with _col1:
             _proj_ref = (
@@ -1376,8 +1415,9 @@ elif pagina == "Varredura Jira":
                 key="jira_incr",
             )
             _max_issues = st.number_input(
-                "Limite de issues por projeto (0 = sem limite)",
+                "Limite de issues (0 = sem limite)",
                 value=500, step=100, min_value=0, key="jira_max",
+                help="Na Pesquisa Dirigida o limite e aplicado sobre os resultados filtrados.",
             )
         with _col2:
             _incluir_anexos = st.checkbox("Incluir anexos (PDF, imagens, DOCX)", value=False, key="jira_anexos")
@@ -1391,7 +1431,15 @@ elif pagina == "Varredura Jira":
             if _is_demo and not _projetos:
                 st.info("Clique em 'Carregar Projetos' para ver os projetos disponíveis.")
 
-        if st.button("Executar Varredura Jira", use_container_width=True, key="btn_jira_scan"):
+        _btn_label_jira = (
+            "Executar Pesquisa Dirigida" if _modo_busca_jira == "Pesquisa Dirigida"
+            else "Executar Varredura Jira"
+        )
+        _btn_disabled_jira = (
+            _modo_busca_jira == "Pesquisa Dirigida" and not _jql_dirigida
+        )
+        if st.button(_btn_label_jira, use_container_width=True, key="btn_jira_scan",
+                     disabled=_btn_disabled_jira):
             _analyzer = get_analyzer()
             _chunks: list = []
             _proj_para_escanear = st.session_state.jira_proj_selecionados or [""]
@@ -1407,9 +1455,11 @@ elif pagina == "Varredura Jira":
 
                     for _pkey in _proj_para_escanear:
                         _label_proj = _pkey or "todos os projetos"
-                        st.write(f"Buscando issues — projeto: {_label_proj}...")
+                        _modo_log = f"[Pesquisa Dirigida]" if _modo_busca_jira == "Pesquisa Dirigida" else ""
+                        st.write(f"Buscando issues {_modo_log} — projeto: {_label_proj}...")
                         _issues = _plugin_jira.buscar_issues(
                             _pkey,
+                            jql_extra=_jql_dirigida if _modo_busca_jira == "Pesquisa Dirigida" else "",
                             desde=_desde,
                             max_total=int(_max_issues),
                         )
@@ -2490,6 +2540,44 @@ elif pagina == "Varredura Confluence":
                     )
 
         sec_hdr("Opcoes de Varredura")
+
+        # ── Modo de busca ──────────────────────────────────────────────────
+        from plugins.pesquisas import PESQUISAS_DIRIGIDAS as _PD_C, montar_query_dirigida as _mqd_c
+
+        _modo_busca_conf = st.radio(
+            "Modo de busca",
+            ["Varredura Completa", "Pesquisa Dirigida"],
+            horizontal=True,
+            key="conf_modo_busca",
+            help="Pesquisa Dirigida usa CQL para pre-filtrar paginas por padrao — muito mais rapido.",
+        )
+
+        _cql_dirigida = ""
+        if _modo_busca_conf == "Pesquisa Dirigida":
+            st.markdown(
+                f'<p style="font-size:12px;color:{TM};margin:4px 0 8px;">'
+                'O Confluence filtra as paginas antes do Presidio rodar.</p>',
+                unsafe_allow_html=True,
+            )
+            _sel_pesquisas_conf = st.multiselect(
+                "Padroes de busca",
+                options=[p["nome"] for p in _PD_C],
+                format_func=lambda n: f"{n} — {next(p['descricao'] for p in _PD_C if p['nome']==n)}",
+                default=["Bearer / Auth tokens", "API Keys", "Senhas e Secrets"],
+                key="conf_pesquisas_sel",
+            )
+            _cql_custom_conf = st.text_input(
+                "CQL adicional (opcional)",
+                placeholder='text ~ "minha_chave" OR text ~ "outro_padrao"',
+                key="conf_cql_custom",
+            )
+            _cql_dirigida = _mqd_c(_sel_pesquisas_conf, _cql_custom_conf)
+            if _cql_dirigida:
+                with st.expander("Preview CQL combinado", expanded=False):
+                    st.code(_cql_dirigida, language="sql")
+            else:
+                st.warning("Selecione ao menos um padrao ou informe um CQL customizado.")
+
         _copt1, _copt2 = st.columns(2)
         with _copt1:
             _space_ref_key = "_".join(
@@ -2501,7 +2589,10 @@ elif pagina == "Varredura Confluence":
                 value=bool(_ultimo_c),
                 key="conf_incr",
             )
-            _max_pag = st.number_input("Limite de paginas por space (0 = sem limite)", value=200, step=50, min_value=0, key="conf_max")
+            _max_pag = st.number_input(
+                "Limite de paginas (0 = sem limite)", value=200, step=50, min_value=0, key="conf_max",
+                help="Na Pesquisa Dirigida o limite e aplicado sobre os resultados filtrados.",
+            )
         with _copt2:
             _status_pag = st.selectbox("Status das paginas", ["current", "draft", "archived"], key="conf_status")
             _incluir_anx_c = st.checkbox("Incluir anexos", value=False, key="conf_anexos")
@@ -2513,7 +2604,15 @@ elif pagina == "Varredura Confluence":
                      "Aumente para reduzir falsos positivos (ex: 70%).",
             )
 
-        if st.button("Executar Varredura Confluence", use_container_width=True, key="btn_conf_scan"):
+        _btn_label_conf = (
+            "Executar Pesquisa Dirigida" if _modo_busca_conf == "Pesquisa Dirigida"
+            else "Executar Varredura Confluence"
+        )
+        _btn_disabled_conf = (
+            _modo_busca_conf == "Pesquisa Dirigida" and not _cql_dirigida
+        )
+        if st.button(_btn_label_conf, use_container_width=True, key="btn_conf_scan",
+                     disabled=_btn_disabled_conf):
             _analyzer_c = get_analyzer()
             _chunks_c: list = []
             _spaces_para_scan = st.session_state.confluence_spaces_selecionados or [""]
@@ -2529,12 +2628,14 @@ elif pagina == "Varredura Confluence":
 
                     for _skey in _spaces_para_scan:
                         _label_space = _skey or "todos os spaces"
-                        st.write(f"Buscando paginas — space: {_label_space}...")
+                        _modo_log_c = "[Pesquisa Dirigida]" if _modo_busca_conf == "Pesquisa Dirigida" else ""
+                        st.write(f"Buscando paginas {_modo_log_c} — space: {_label_space}...")
                         _paginas = _plugin_conf.buscar_paginas(
                             _skey,
                             status=_status_pag,
                             desde=_desde_c,
                             max_total=int(_max_pag),
+                            cql_extra=_cql_dirigida if _modo_busca_conf == "Pesquisa Dirigida" else "",
                         )
                         st.write(f"  {len(_paginas)} paginas. Extraindo texto...")
                         _total_pags_count += len(_paginas)
