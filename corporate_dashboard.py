@@ -465,7 +465,13 @@ def _add_history(tipo: str, key: str, m: dict) -> None:
     _secrets = m.get("total_secrets", 0)
     _total = m.get("total_deteccoes", 0)
     _score = m.get("compliance_score", 0.0)
-    _ents = list(m.get("por_entidade", {}).keys())
+    _pe = m.get("por_entidade", {})
+    if isinstance(_pe, dict):
+        _ents = list(_pe.keys())
+    elif isinstance(_pe, list):
+        _ents = [d.get("entidade", d) if isinstance(d, dict) else str(d) for d in _pe if d]
+    else:
+        _ents = []
 
     st.session_state.scan_history.insert(0, {
         "tipo": tipo, "key": key,
