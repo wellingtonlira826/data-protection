@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -164,6 +165,40 @@ def variaveis_de_chunks(
     }
 
 
+# ── Extração de imagens inline ────────────────────────────────────────────────
+
+def extrair_imagens_data_uri(html: str) -> tuple[str, list[dict]]:
+    """Extrai data: URIs do HTML, substitui por referências CID para inline attachments.
+
+    Retorna (html_com_cids, lista_de_imagens) onde cada imagem é:
+    {"content_id": str, "nome": str, "mime_type": str, "base64": str}
+    """
+    imagens: list[dict] = []
+    counter = 0
+
+    def _sub(match: re.Match) -> str:
+        nonlocal counter
+        mime_type = match.group(1)              # ex: image/png
+        b64_data = match.group(2).strip()       # base64 puro
+        ext = mime_type.split("/")[-1].replace("jpeg", "jpg").replace("svg+xml", "svg")
+        counter += 1
+        cid = f"sig_{counter}@dp"
+        imagens.append({
+            "content_id": cid,
+            "nome": f"sig_{counter}.{ext}",
+            "mime_type": mime_type,
+            "base64": b64_data,
+        })
+        return f'src="cid:{cid}"'
+
+    html_novo = re.sub(
+        r'src=["\']data:(image/[^;\'\"]+);base64,([^\'\"]+)["\']',
+        _sub,
+        html,
+    )
+    return html_novo, imagens
+
+
 # ── Plugin Graph ──────────────────────────────────────────────────────────────
 
 class GraphEmailPlugin:
@@ -211,28 +246,68 @@ class GraphEmailPlugin:
         assunto: str,
         corpo_html: str,
         cc: list[str] | None = None,
+        assinatura_html: str = "",
+        imagens: list[dict] | None = None,
     ) -> dict[str, Any]:
-        """Envia email. Retorna {"ok": bool, "mensagem": str}."""
+        """Envia email com suporte a assinatura HTML e imagens inline (CID).
+
+        Args:
+            para: Lista de destinatários.
+            assunto: Assunto do email.
+            corpo_html: Corpo principal (HTML, com placeholders já preenchidos).
+            cc: Lista de CCs (opcional).
+            assinatura_html: HTML da assinatura — anexado após <hr/> no corpo.
+            imagens: Lista de dicts {"content_id", "nome", "mime_type", "base64"}
+                     para imagens inline referenciadas como cid: na assinatura.
+        """
         destinatarios = [addr.strip() for addr in para if addr.strip()]
         if not destinatarios:
             return {"ok": False, "mensagem": "Nenhum destinatario informado."}
 
+        # Combina corpo + assinatura
+        corpo_final = corpo_html
+        _imgs = list(imagens) if imagens else []
+
+        if assinatura_html:
+            # Extrai data: URIs residuais da assinatura (safety net)
+            assinatura_limpa, _extra = extrair_imagens_data_uri(assinatura_html)
+            _imgs.extend(_extra)
+            corpo_final += (
+                '<hr style="border:none;border-top:1px solid #e0e0e0;margin:20px 0 12px;"/>'
+                + assinatura_limpa
+            )
+
         payload: dict[str, Any] = {
             "message": {
                 "subject": assunto,
-                "body": {"contentType": "HTML", "content": corpo_html},
+                "body": {"contentType": "HTML", "content": corpo_final},
                 "toRecipients": [
                     {"emailAddress": {"address": addr}} for addr in destinatarios
                 ],
             },
             "saveToSentItems": True,
         }
+
         if cc:
             cc_limpo = [addr.strip() for addr in cc if addr.strip()]
             if cc_limpo:
                 payload["message"]["ccRecipients"] = [
                     {"emailAddress": {"address": addr}} for addr in cc_limpo
                 ]
+
+        # Adiciona imagens como inline attachments (CID)
+        if _imgs:
+            payload["message"]["attachments"] = [
+                {
+                    "@odata.type": "#microsoft.graph.fileAttachment",
+                    "name": img["nome"],
+                    "contentType": img["mime_type"],
+                    "contentBytes": img["base64"],
+                    "isInline": True,
+                    "contentId": img["content_id"],
+                }
+                for img in _imgs
+            ]
 
         try:
             resp = requests.post(

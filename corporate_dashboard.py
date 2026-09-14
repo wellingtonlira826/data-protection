@@ -27,7 +27,9 @@ from plugins.email_plugin import (
     salvar_templates,
     preencher_template,
     variaveis_de_chunks,
+    extrair_imagens_data_uri,
 )
+from plugins.html_editor import html_paste_editor
 
 st.set_page_config(
     page_title="Data Protection | PII & Secrets Scanner",
@@ -1578,14 +1580,43 @@ elif pagina == "Varredura Jira":
 
             # Editar templates existentes
             for _ti, _tpl in enumerate(_tpls):
-                with st.expander(f"Template: {_tpl['nome']}", expanded=False):
-                    _t_nome = st.text_input("Nome", value=_tpl["nome"], key=f"tpl_nome_{_ti}")
+                _has_sig = bool(_tpl.get("assinatura"))
+                _sig_tag = " [com assinatura]" if _has_sig else ""
+                with st.expander(f"Template: {_tpl['nome']}{_sig_tag}", expanded=False):
+                    _t_nome    = st.text_input("Nome", value=_tpl["nome"], key=f"tpl_nome_{_ti}")
                     _t_assunto = st.text_input("Assunto", value=_tpl["assunto"], key=f"tpl_assunto_{_ti}")
-                    _t_corpo = st.text_area("Corpo (HTML)", value=_tpl["corpo"], height=200, key=f"tpl_corpo_{_ti}")
+                    _t_corpo   = st.text_area(
+                        "Corpo (HTML)",
+                        value=_tpl["corpo"],
+                        height=180,
+                        key=f"tpl_corpo_{_ti}",
+                    )
+                    st.markdown(
+                        f'<div style="font-size:12px;font-weight:600;color:{TD};margin:10px 0 4px;">'
+                        f'Assinatura — cole do Outlook e clique em "Salvar assinatura"</div>',
+                        unsafe_allow_html=True,
+                    )
+                    _t_assinatura = html_paste_editor(
+                        value=_tpl.get("assinatura", ""),
+                        key=f"tpl_assinatura_{_ti}",
+                    )
+                    if _tpl.get("imagens"):
+                        st.markdown(
+                            f'<p style="font-size:11px;color:{TM};margin-top:4px;">'
+                            f'{len(_tpl["imagens"])} imagem(ns) salva(s) neste template.</p>',
+                            unsafe_allow_html=True,
+                        )
                     _tc1, _tc2 = st.columns(2, gap="small")
                     with _tc1:
-                        if st.button("Salvar alteracoes", key=f"tpl_salvar_{_ti}", use_container_width=True):
-                            _tpls[_ti] = {"nome": _t_nome, "assunto": _t_assunto, "corpo": _t_corpo}
+                        if st.button("Salvar template", key=f"tpl_salvar_{_ti}", use_container_width=True):
+                            _assin_clean, _imgs_novos = extrair_imagens_data_uri(_t_assinatura)
+                            _tpls[_ti] = {
+                                "nome": _t_nome,
+                                "assunto": _t_assunto,
+                                "corpo": _t_corpo,
+                                "assinatura": _assin_clean,
+                                "imagens": _imgs_novos,
+                            }
                             salvar_templates(_tpls)
                             st.session_state.email_templates = _tpls
                             st.success("Template salvo.")
@@ -1599,13 +1630,28 @@ elif pagina == "Varredura Jira":
 
             # Novo template
             with st.expander("+ Adicionar novo template", expanded=False):
-                _nt_nome = st.text_input("Nome do template", key="novo_tpl_nome")
+                _nt_nome    = st.text_input("Nome do template", key="novo_tpl_nome")
                 _nt_assunto = st.text_input("Assunto", key="novo_tpl_assunto")
-                _nt_corpo = st.text_area("Corpo (HTML)", height=160, key="novo_tpl_corpo",
-                                         placeholder="<p>Prezado(a),</p><p>...</p>")
+                _nt_corpo   = st.text_area(
+                    "Corpo (HTML)", height=140, key="novo_tpl_corpo",
+                    placeholder="<p>Prezado(a),</p><p>...</p>",
+                )
+                st.markdown(
+                    f'<div style="font-size:12px;font-weight:600;color:{TD};margin:8px 0 4px;">'
+                    f'Assinatura (opcional)</div>',
+                    unsafe_allow_html=True,
+                )
+                _nt_assinatura = html_paste_editor(value="", key="novo_tpl_assinatura")
                 if st.button("Adicionar Template", key="btn_add_tpl", use_container_width=False):
                     if _nt_nome and _nt_assunto:
-                        _tpls.append({"nome": _nt_nome, "assunto": _nt_assunto, "corpo": _nt_corpo})
+                        _assin_c, _imgs_c = extrair_imagens_data_uri(_nt_assinatura)
+                        _tpls.append({
+                            "nome": _nt_nome,
+                            "assunto": _nt_assunto,
+                            "corpo": _nt_corpo,
+                            "assinatura": _assin_c,
+                            "imagens": _imgs_c,
+                        })
                         salvar_templates(_tpls)
                         st.session_state.email_templates = _tpls
                         st.success(f"Template '{_nt_nome}' adicionado.")
@@ -1925,6 +1971,8 @@ elif pagina == "Varredura Jira":
                                     assunto=_filled["assunto"],
                                     corpo_html=_filled["corpo"],
                                     cc=_cc_list or None,
+                                    assinatura_html=_tpl_obj.get("assinatura", ""),
+                                    imagens=_tpl_obj.get("imagens"),
                                 )
                                 if _res_email["ok"]:
                                     st.success(_res_email["mensagem"])
@@ -2118,6 +2166,8 @@ elif pagina == "Varredura Jira":
                                         assunto=_filled_b["assunto"],
                                         corpo_html=_filled_b["corpo"],
                                         cc=_cc_bulk or None,
+                                        assinatura_html=_tpl_obj_bulk.get("assinatura", ""),
+                                        imagens=_tpl_obj_bulk.get("imagens"),
                                     )
                                     if _res_b["ok"]:
                                         _email_ok_bulk += 1

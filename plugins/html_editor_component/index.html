@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    padding: 6px;
+    background: transparent;
+    color: #fafafa;
+  }
+  #label {
+    font-size: 12px;
+    color: rgba(200,200,200,0.7);
+    margin-bottom: 6px;
+  }
+  #editor {
+    min-height: 100px;
+    max-height: 240px;
+    overflow-y: auto;
+    border: 1px solid rgba(128,128,128,0.35);
+    border-radius: 6px;
+    padding: 10px 12px;
+    background: rgba(255,255,255,0.04);
+    outline: none;
+    font-size: 13px;
+    line-height: 1.5;
+    word-break: break-word;
+  }
+  #editor:focus { border-color: rgba(255,75,75,0.6); }
+  #editor:empty::before {
+    content: 'Cole sua assinatura do Outlook aqui (Ctrl+V) — formatacao e imagens sao preservadas automaticamente';
+    color: rgba(160,160,160,0.5);
+    pointer-events: none;
+    display: block;
+    font-style: italic;
+  }
+  .toolbar {
+    margin-top: 8px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .btn {
+    padding: 5px 14px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition: opacity 0.15s;
+  }
+  .btn:hover { opacity: 0.82; }
+  .btn-save  { background: #ff4b4b; color: #fff; }
+  .btn-clear { background: rgba(128,128,128,0.18); color: #ddd; }
+  #status {
+    font-size: 11px;
+    color: rgba(160,200,160,0.85);
+    margin-left: 2px;
+  }
+  #img-list {
+    margin-top: 8px;
+    font-size: 11px;
+    color: rgba(160,160,160,0.7);
+    display: none;
+  }
+  #img-list span { color: rgba(140,180,255,0.9); }
+</style>
+</head>
+<body>
+
+<div id="label">Assinatura HTML — cole do Outlook e clique em Salvar</div>
+<div id="editor" contenteditable="true"></div>
+
+<div class="toolbar">
+  <button class="btn btn-save"  onclick="salvar()">Salvar assinatura</button>
+  <button class="btn btn-clear" onclick="limpar()">Limpar</button>
+  <span id="status"></span>
+</div>
+
+<div id="img-list"></div>
+
+<script>
+  const editor   = document.getElementById('editor');
+  const status   = document.getElementById('status');
+  const imgList  = document.getElementById('img-list');
+
+  // ── Streamlit component protocol ─────────────────────────────────────
+  function send(type, extra) {
+    window.parent.postMessage({ isStreamlitMessage: true, type, ...extra }, '*');
+  }
+  function setComponentValue(val) {
+    send('streamlit:setComponentValue', { value: val, dataType: 'json' });
+  }
+  function updateHeight() {
+    const h = Math.max(document.body.scrollHeight + 10, 170);
+    send('streamlit:setFrameHeight', { height: h });
+  }
+
+  send('streamlit:componentReady', { apiVersion: 1 });
+
+  // Receive initial value from Streamlit
+  window.addEventListener('message', function(e) {
+    if (!e.data || e.data.type !== 'streamlit:render') return;
+    const args = e.data.args || {};
+    if (args.value !== undefined && args.value !== null && editor.innerHTML !== String(args.value)) {
+      editor.innerHTML = String(args.value);
+      updateImgList();
+    }
+    updateHeight();
+  });
+
+  // ── Paste: capture HTML from Outlook / any source ────────────────────
+  editor.addEventListener('paste', function(e) {
+    e.preventDefault();
+    const html = e.clipboardData.getData('text/html');
+    if (html) {
+      // Sanitize Office namespace junk but keep structure + images
+      const clean = html
+        .replace(/<\?xml[^>]*>/gi, '')
+        .replace(/<!--\[if[^\]]*\]>[\s\S]*?<!\[endif\]-->/gi, '')
+        .replace(/<o:[^>]*>[\s\S]*?<\/o:[^>]*>/gi, '')
+        .replace(/<w:[^>]*>[\s\S]*?<\/w:[^>]*>/gi, '');
+      editor.innerHTML = clean;
+      setStatus('HTML colado — clique em Salvar para confirmar.', false);
+    } else {
+      const text = e.clipboardData.getData('text/plain');
+      editor.innerText = text;
+      setStatus('Texto colado (sem HTML).', false);
+    }
+    updateImgList();
+    updateHeight();
+  });
+
+  function salvar() {
+    setComponentValue(editor.innerHTML);
+    setStatus('✓ Assinatura salva!', true);
+    setTimeout(() => { status.textContent = ''; }, 3000);
+  }
+
+  function limpar() {
+    editor.innerHTML = '';
+    imgList.style.display = 'none';
+    imgList.innerHTML = '';
+    setComponentValue('');
+    setStatus('Limpo.', false);
+  }
+
+  function setStatus(msg, ok) {
+    status.textContent = msg;
+    status.style.color = ok ? 'rgba(140,210,140,0.9)' : 'rgba(210,180,100,0.9)';
+  }
+
+  function updateImgList() {
+    const imgs = editor.querySelectorAll('img');
+    if (!imgs.length) { imgList.style.display = 'none'; return; }
+    let html = `${imgs.length} imagem(ns) detectada(s): `;
+    imgs.forEach((img, i) => {
+      const src = img.getAttribute('src') || '';
+      const label = src.startsWith('data:') ? `[imagem ${i+1} — base64]` :
+                    src.startsWith('cid:')  ? `[CID: ${src.slice(4)}]` :
+                    src.substring(0, 50) + (src.length > 50 ? '...' : '');
+      html += `<span>${label}</span> `;
+    });
+    imgList.innerHTML = html;
+    imgList.style.display = 'block';
+    updateHeight();
+  }
+
+  new MutationObserver(() => { updateImgList(); updateHeight(); })
+    .observe(editor, { childList: true, subtree: true, characterData: true });
+
+  updateHeight();
+</script>
+</body>
+</html>
