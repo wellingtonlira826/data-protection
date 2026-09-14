@@ -1681,10 +1681,15 @@ elif pagina == "Varredura Jira":
 
                         with _bc2:
                             if _modo_atual == "scrub":
+                                # Só habilita preview se permissão confirmada
+                                _preview_ok = _is_real_ac and _perm_status is True
                                 if st.button(
-                                    "Carregar Preview",
+                                    "Carregar Preview" if _preview_ok else (
+                                        "Sem permissao" if _perm_status is False
+                                        else "Verificar permissao primeiro"
+                                    ),
                                     key=f"preview_{_ik}",
-                                    disabled=not _is_real_ac,
+                                    disabled=not _preview_ok,
                                     use_container_width=True,
                                 ):
                                     _chunks_ik = [r for r in _res_jira if r.chunk.get("issue_key") == _ik]
@@ -1694,7 +1699,12 @@ elif pagina == "Varredura Jira":
                                     st.rerun()
 
                         with _bc3:
-                            _can_write = _is_real_ac and (_perm_status is not False)
+                            # Para scrub: requer permissão explicitamente confirmada (True)
+                            # Para outros modos: basta não ter sido negada
+                            if _modo_atual == "scrub":
+                                _can_write = _is_real_ac and _perm_status is True
+                            else:
+                                _can_write = _is_real_ac and (_perm_status is not False)
                             _btn_label_card = (
                                 "Aplicar Scrub" if _modo_atual == "scrub"
                                 else "Corrigir Este Card"
@@ -1718,6 +1728,14 @@ elif pagina == "Varredura Jira":
                                                 _err_c.append(_ar["mensagem"])
                                         for _em in _err_c:
                                             st.error(_em)
+
+                        # Para scrub sem permissão verificada: instrução clara
+                        if _modo_atual == "scrub" and _perm_status is None:
+                            st.info(
+                                "Clique em **Verificar permissao** antes de carregar o preview "
+                                "e aplicar o scrubbing neste card.",
+                                icon="ℹ️",
+                            )
 
                         # Preview de scrub para este card
                         if (
@@ -1767,11 +1785,23 @@ elif pagina == "Varredura Jira":
                                 type="primary",
                             ):
                                 _chunks_scrub = [r for r in _res_jira if r.chunk.get("issue_key") == _ik]
-                                for _ar in _jp.actions.scrub_aplicar(_ik, _chunks_scrub):
-                                    if _ar["ok"]:
-                                        st.success(f"{_ar['acao']}: {_ar['mensagem']}")
-                                    else:
-                                        st.error(f"{_ar['acao']}: {_ar['mensagem']}")
+                                with st.status(f"Aplicando scrub em {_ik}...", expanded=True) as _scrub_sts:
+                                    _scrub_ok, _scrub_errs = 0, []
+                                    for _ar in _jp.actions.scrub_aplicar(_ik, _chunks_scrub):
+                                        if _ar["ok"]:
+                                            _scrub_ok += 1
+                                            st.write(f"{_ar['acao']}: {_ar['mensagem']}")
+                                        else:
+                                            _scrub_errs.append(_ar["mensagem"])
+                                    _scrub_sts.update(
+                                        label=f"Scrub concluido — {_scrub_ok} campo(s) anonimizado(s).",
+                                        state="complete" if not _scrub_errs else "error",
+                                    )
+                                for _se in _scrub_errs:
+                                    st.error(_se)
+                                # Limpa preview após aplicar
+                                st.session_state.scrub_preview = []
+                                st.session_state.scrub_issue_selecionada = None
 
             # ── Acao em massa ─────────────────────────────────────────────
             if _issues_filtradas and _modo_atual != "scrub":

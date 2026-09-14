@@ -204,25 +204,62 @@ class JiraActions:
     # ── Permissão ─────────────────────────────────────────────────────────────
 
     def checar_permissao(self, issue_key: str) -> PermissaoResult:
-        """Verifica se o token atual tem permissão de edição na issue."""
+        """Verifica se o token atual tem permissão de edição na issue.
+
+        Tenta v3 (Cloud) primeiro, fallback automático para v2 (Server/DC).
+        Último recurso: editmeta da issue como proxy de permissão de edição.
+        """
+        last_exc: Exception | None = None
+        for api_version in ("3", "2"):
+            try:
+                url = (
+                    f"{self._base_url}/rest/api/{api_version}/mypermissions"
+                    f"?issueKey={issue_key}&permissions=EDIT_ISSUES"
+                )
+                resp = self._client._session.get(url)
+                if resp.status_code == 404 and api_version == "3":
+                    # Endpoint v3 não existe — instância Server, tenta v2
+                    continue
+                resp.raise_for_status()
+                data = resp.json()
+                pode = (
+                    data.get("permissions", {})
+                    .get("EDIT_ISSUES", {})
+                    .get("havePermission", False)
+                )
+                msg = (
+                    "Permissao de edicao confirmada."
+                    if pode
+                    else "Sem permissao de edicao nesta issue."
+                )
+                return PermissaoResult(pode_editar=pode, mensagem=msg)
+            except Exception as exc:
+                last_exc = exc
+                if api_version == "3":
+                    continue  # tenta v2
+
+        # Último recurso: editmeta — retorna 200 se pode editar, 403 se não pode
         try:
-            url = (
-                f"{self._base_url}/rest/api/3/mypermissions"
-                f"?issueKey={issue_key}&permissions=EDIT_ISSUES"
-            )
+            url = f"{self._base_url}/rest/api/2/issue/{issue_key}/editmeta"
             resp = self._client._session.get(url)
-            resp.raise_for_status()
-            data = resp.json()
-            pode = (
-                data.get("permissions", {})
-                .get("EDIT_ISSUES", {})
-                .get("havePermission", False)
-            )
-            msg = "Permissao de edicao confirmada." if pode else "Sem permissao de edicao nesta issue."
-            return PermissaoResult(pode_editar=pode, mensagem=msg)
-        except Exception as exc:
-            logger.warning("Erro ao checar permissao em '%s': %s", issue_key, exc)
-            return PermissaoResult(pode_editar=False, mensagem=f"Erro ao checar permissao: {exc}")
+            if resp.status_code == 200:
+                return PermissaoResult(
+                    pode_editar=True,
+                    mensagem="Permissao de edicao confirmada (via editmeta).",
+                )
+            if resp.status_code == 403:
+                return PermissaoResult(
+                    pode_editar=False,
+                    mensagem="Sem permissao de edicao nesta issue.",
+                )
+        except Exception:
+            pass
+
+        logger.warning("Erro ao checar permissao em '%s': %s", issue_key, last_exc)
+        return PermissaoResult(
+            pode_editar=False,
+            mensagem=f"Nao foi possivel verificar permissao: {last_exc}",
+        )
 
     # ── Issue Properties (oculto na UI) ───────────────────────────────────────
 
@@ -234,31 +271,43 @@ class JiraActions:
     ) -> AcaoResult:
         """Grava resultado do scan em Issue Properties — invisivel na UI do Jira."""
         payload = _resumo_para_properties(resultados, timestamp)
-        url = f"{self._base_url}/rest/api/3/issue/{issue_key}/properties/{_PROPERTY_KEY}"
-        try:
-            resp = self._client._session.put(
-                url,
-                data=json.dumps(payload),
-                headers={"Content-Type": "application/json"},
-            )
-            resp.raise_for_status()
-            return AcaoResult(acao="properties", ok=True, mensagem="Resultado salvo em Issue Properties.")
-        except Exception as exc:
-            logger.error("Erro ao salvar properties em '%s': %s", issue_key, exc)
-            return AcaoResult(acao="properties", ok=False, mensagem=f"Erro: {exc}")
+        for api_version in ("3", "2"):
+            url = f"{self._base_url}/rest/api/{api_version}/issue/{issue_key}/properties/{_PROPERTY_KEY}"
+            try:
+                resp = self._client._session.put(
+                    url,
+                    data=json.dumps(payload),
+                    headers={"Content-Type": "application/json"},
+                )
+                if resp.status_code == 404 and api_version == "3":
+                    continue
+                resp.raise_for_status()
+                return AcaoResult(acao="properties", ok=True, mensagem="Resultado salvo em Issue Properties.")
+            except Exception as exc:
+                if api_version == "3":
+                    continue
+                logger.error("Erro ao salvar properties em '%s': %s", issue_key, exc)
+                return AcaoResult(acao="properties", ok=False, mensagem=f"Erro: {exc}")
+        return AcaoResult(acao="properties", ok=False, mensagem="Endpoint properties indisponivel.")
 
     def ler_properties(self, issue_key: str) -> dict[str, Any] | None:
         """Lê resultado anterior salvo em Issue Properties."""
-        url = f"{self._base_url}/rest/api/3/issue/{issue_key}/properties/{_PROPERTY_KEY}"
-        try:
-            resp = self._client._session.get(url)
-            if resp.status_code == 404:
+        for api_version in ("3", "2"):
+            url = f"{self._base_url}/rest/api/{api_version}/issue/{issue_key}/properties/{_PROPERTY_KEY}"
+            try:
+                resp = self._client._session.get(url)
+                if resp.status_code == 404 and api_version == "3":
+                    continue
+                if resp.status_code == 404:
+                    return None
+                resp.raise_for_status()
+                return resp.json().get("value")
+            except Exception as exc:
+                if api_version == "3":
+                    continue
+                logger.warning("Erro ao ler properties de '%s': %s", issue_key, exc)
                 return None
-            resp.raise_for_status()
-            return resp.json().get("value")
-        except Exception as exc:
-            logger.warning("Erro ao ler properties de '%s': %s", issue_key, exc)
-            return None
+        return None
 
     # ── Labels ────────────────────────────────────────────────────────────────
 
