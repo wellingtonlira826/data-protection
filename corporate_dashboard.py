@@ -1366,6 +1366,13 @@ elif pagina == "Varredura Jira":
             )
         with _col2:
             _incluir_anexos = st.checkbox("Incluir anexos (PDF, imagens, DOCX)", value=False, key="jira_anexos")
+            _conf_scan_jira = st.slider(
+                "Confianca minima do scan (%)",
+                min_value=0, max_value=100, value=0, step=5,
+                key="jira_conf_scan",
+                help="Deteccoes com confianca abaixo deste valor sao descartadas na origem. "
+                     "Aumente para reduzir falsos positivos (ex: 70%).",
+            )
             if _is_demo and not _projetos:
                 st.info("Clique em 'Carregar Projetos' para ver os projetos disponíveis.")
 
@@ -1416,7 +1423,7 @@ elif pagina == "Varredura Jira":
                         _store.set_last_scan("jira", _proj_ref_key, total_items=_total_issues_count)
 
                 st.write(f"Processando {len(_chunks)} chunks em paralelo...")
-                _resultados = scan_chunks(_chunks, _analyzer)
+                _resultados = scan_chunks(_chunks, _analyzer, min_confianca=_conf_scan_jira / 100)
                 _metricas = resumir(_resultados)
                 st.session_state.jira_resultados = _resultados
                 st.session_state.jira_metricas = _metricas
@@ -2129,6 +2136,13 @@ elif pagina == "Varredura Confluence":
         with _copt2:
             _status_pag = st.selectbox("Status das paginas", ["current", "draft", "archived"], key="conf_status")
             _incluir_anx_c = st.checkbox("Incluir anexos", value=False, key="conf_anexos")
+            _conf_scan_conf = st.slider(
+                "Confianca minima do scan (%)",
+                min_value=0, max_value=100, value=0, step=5,
+                key="conf_conf_scan",
+                help="Deteccoes com confianca abaixo deste valor sao descartadas na origem. "
+                     "Aumente para reduzir falsos positivos (ex: 70%).",
+            )
 
         if st.button("Executar Varredura Confluence", use_container_width=True, key="btn_conf_scan"):
             _analyzer_c = get_analyzer()
@@ -2181,7 +2195,7 @@ elif pagina == "Varredura Confluence":
                         _cstore.set_last_scan("confluence", _space_ref_key, total_items=_total_pags_count)
 
                 st.write(f"Processando {len(_chunks_c)} chunks em paralelo...")
-                _res_c = scan_chunks(_chunks_c, _analyzer_c)
+                _res_c = scan_chunks(_chunks_c, _analyzer_c, min_confianca=_conf_scan_conf / 100)
                 _met_c = resumir(_res_c)
                 st.session_state.confluence_resultados = _res_c
                 st.session_state.confluence_metricas = _met_c

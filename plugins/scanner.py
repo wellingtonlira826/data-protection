@@ -90,6 +90,7 @@ def _processar_chunk(
     chunk: dict[str, Any],
     analyzer: AnalyzerEngine,
     language: str,
+    min_confianca: float = 0.0,
 ) -> ResultadoChunk:
     texto = chunk.get("texto", "")
     if not texto.strip():
@@ -103,6 +104,8 @@ def _processar_chunk(
 
     deteccoes: list[Deteccao] = []
     for r in resultados:
+        if r.score < min_confianca:
+            continue
         valor = texto[r.start:r.end]
         nivel, label = score(r.entity_type)
         deteccoes.append(
@@ -128,6 +131,7 @@ def scan_chunks(
     language: str = "pt",
     max_workers: int = _DEFAULT_WORKERS,
     progress_cb: Callable[[int, int], None] | None = None,
+    min_confianca: float = 0.0,
 ) -> list[ResultadoChunk]:
     """Processa chunks em paralelo com ThreadPoolExecutor.
 
@@ -137,6 +141,7 @@ def scan_chunks(
         language: Idioma para análise ("pt" ou "en").
         max_workers: Threads paralelas. Padrão: min(8, cpu_count + 2).
         progress_cb: Callback(concluidos, total) — útil para barra de progresso.
+        min_confianca: Confiança mínima (0.0–1.0). Detecções abaixo são descartadas na origem.
 
     Returns:
         Lista de ResultadoChunk na mesma ordem dos chunks de entrada.
@@ -150,7 +155,7 @@ def scan_chunks(
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
-            executor.submit(_processar_chunk, chunk, analyzer, language): idx
+            executor.submit(_processar_chunk, chunk, analyzer, language, min_confianca): idx
             for idx, chunk in enumerate(chunks)
         }
 
