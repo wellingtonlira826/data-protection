@@ -122,11 +122,11 @@ class ConfluencePlugin:
                     cloud=False,
                     verify_ssl=False,
                 )
-            conexao = self._client.get_spaces(limit=1)
+            conexao = self._client.get_spaces(params={"limit": 1})
             results = (
                 conexao.get("results", [])
                 if isinstance(conexao, dict)
-                else []
+                else (conexao if isinstance(conexao, list) else [])
             )
             qtd = len(results) if isinstance(results, list) else 0
             msg = f"Conectado. {qtd} space(s) acessível(is)."
@@ -137,30 +137,61 @@ class ConfluencePlugin:
             logger.error("Falha ao conectar Confluence: %s", exc)
             return ConnResult(ok=False, message=msg)
 
-    def listar_spaces(self, max_results: int = 200, com_contagem: bool = True) -> list[dict]:
-        """Lista spaces acessíveis com contagem de páginas (paralelo)."""
+    def listar_spaces(self, max_results: int = 0, com_contagem: bool = True) -> list[dict]:
+        """Lista spaces acessíveis com contagem de páginas (paralelo).
+
+        max_results: 0 = sem limite (todos os spaces acessíveis).
+        """
         if not self._client:
             logger.warning("Não conectado ao listar spaces")
             return []
         try:
             from concurrent.futures import ThreadPoolExecutor
-            resultado = self._client.get_spaces(limit=max_results)
-            spaces = resultado.get("results", []) if isinstance(resultado, dict) else []
+
+            raw: list[dict] = []
+
+            # Cloud: get_all_spaces() pagina via _get_paged automaticamente
+            if self._cloud:
+                try:
+                    raw = list(self._client.get_all_spaces())
+                except Exception:
+                    pass
+
+            # Server (ou fallback Cloud): paginação manual com params dict
+            if not raw:
+                page_size = 50
+                start = 0
+                while True:
+                    resultado = self._client.get_spaces(
+                        params={"start": start, "limit": page_size}
+                    )
+                    if isinstance(resultado, list):
+                        raw.extend(resultado)
+                        break
+                    batch = resultado.get("results", []) if isinstance(resultado, dict) else []
+                    raw.extend(batch)
+                    if len(batch) < page_size:
+                        break
+                    start += page_size
+
+            if max_results:
+                raw = raw[:max_results]
 
             if not com_contagem:
-                return [{"key": s["key"], "name": s["name"], "count": -1} for s in spaces]
+                return [{"key": s["key"], "name": s.get("name", s.get("title", "")), "count": -1} for s in raw]
 
-            def _contar(space):
+            def _contar(space: dict):
                 key = space["key"]
+                name = space.get("name") or space.get("title", key)
                 try:
-                    r = self._client.cql(f'space = "{key}" AND type = page', limit=0)
+                    r = self._client.cql(f'space = "{key}" AND type = page', limit=1)
                     count = r.get("totalSize", 0) if isinstance(r, dict) else 0
-                    return {"key": key, "name": space["name"], "count": count}
+                    return {"key": key, "name": name, "count": count}
                 except Exception:
-                    return {"key": key, "name": space["name"], "count": -1}
+                    return {"key": key, "name": name, "count": -1}
 
-            with ThreadPoolExecutor(max_workers=min(8, len(spaces) or 1)) as ex:
-                results = list(ex.map(_contar, spaces))
+            with ThreadPoolExecutor(max_workers=min(8, len(raw) or 1)) as ex:
+                results = list(ex.map(_contar, raw))
 
             return sorted(results, key=lambda x: x.get("count", 0), reverse=True)
         except Exception:
