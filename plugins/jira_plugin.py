@@ -136,25 +136,39 @@ class JiraPlugin:
         try:
             from concurrent.futures import ThreadPoolExecutor
 
-            # Paginação via /project/search (Jira Cloud) com fallback para Server
             raw: list[dict] = []
-            page_size = 50
-            start = 0
-            try:
+            page_size = 100
+
+            def _paginar(endpoint: str) -> list[dict]:
+                acc: list[dict] = []
+                start = 0
                 while True:
                     data = self._client._get_json(
-                        "project/search",
+                        endpoint,
                         params={"startAt": start, "maxResults": page_size},
                     )
+                    # /project (Server legado) retorna lista plana diretamente
+                    if isinstance(data, list):
+                        acc.extend(data)
+                        break
                     batch = data.get("values", [])
-                    raw.extend(batch)
-                    if data.get("isLast", True) or len(batch) < page_size:
+                    acc.extend(batch)
+                    total = data.get("total")
+                    is_last = data.get("isLast", False)
+                    if is_last or len(batch) < page_size:
+                        break
+                    if total is not None and len(acc) >= total:
                         break
                     start += page_size
-            except Exception:
-                # Fallback Jira Server: /project retorna todos sem paginação
-                server_projs = self._client.projects()
-                raw = [{"key": p.key, "name": p.name} for p in server_projs]
+                return acc
+
+            # /project/search = Jira Cloud + Server 8.x+; /project = Server legado
+            for _ep in ("project/search", "project"):
+                try:
+                    raw = _paginar(_ep)
+                    break
+                except Exception:
+                    raw = []
 
             if max_results:
                 raw = raw[:max_results]
