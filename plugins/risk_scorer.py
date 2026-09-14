@@ -21,6 +21,7 @@ class RiscoEntry(TypedDict):
 
 
 RISK_MAP: dict[str, RiscoEntry] = {
+    # PII brasileira — identificação direta
     "CPF": {"nivel": "HIGH", "label": "ALTO"},
     "CNPJ": {"nivel": "HIGH", "label": "ALTO"},
     "RG": {"nivel": "HIGH", "label": "ALTO"},
@@ -28,15 +29,24 @@ RISK_MAP: dict[str, RiscoEntry] = {
     "CARTAO_CREDITO": {"nivel": "HIGH", "label": "ALTO"},
     "TITULO_ELEITOR": {"nivel": "HIGH", "label": "ALTO"},
     "CNH": {"nivel": "HIGH", "label": "ALTO"},
+    # PII de contato
     "EMAIL_ADDRESS": {"nivel": "MEDIUM", "label": "MEDIO"},
     "TELEFONE_BR": {"nivel": "MEDIUM", "label": "MEDIO"},
     "PHONE_NUMBER": {"nivel": "MEDIUM", "label": "MEDIO"},
     "CEP": {"nivel": "MEDIUM", "label": "MEDIO"},
+    # PII contextual
     "PERSON": {"nivel": "LOW", "label": "BAIXO"},
     "LOCATION": {"nivel": "LOW", "label": "BAIXO"},
     "ORGANIZATION": {"nivel": "LOW", "label": "BAIXO"},
     "DATE_TIME": {"nivel": "LOW", "label": "BAIXO"},
     "URL": {"nivel": "LOW", "label": "BAIXO"},
+    # Secrets e credenciais — OWASP LLM Top 10 (LLM06)
+    "JWT_TOKEN": {"nivel": "HIGH", "label": "ALTO"},
+    "AWS_ACCESS_KEY": {"nivel": "HIGH", "label": "ALTO"},
+    "GITHUB_TOKEN": {"nivel": "HIGH", "label": "ALTO"},
+    "PRIVATE_KEY": {"nivel": "HIGH", "label": "ALTO"},
+    "CONNECTION_STRING": {"nivel": "HIGH", "label": "ALTO"},
+    "SECRET_IN_CONTEXT": {"nivel": "HIGH", "label": "ALTO"},
 }
 
 # ── Ordenação ─────────────────────────────────────────────────────────────────

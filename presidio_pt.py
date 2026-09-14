@@ -93,6 +93,74 @@ def _build_registry() -> RecognizerRegistry:
                 Pattern("Email", r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", 0.95),
             ],
         ),
+        # ── Secrets e credenciais (risco OWASP LLM Top 10) ───────────────────
+        PatternRecognizer(
+            supported_entity="JWT_TOKEN",
+            supported_language="pt",
+            patterns=[
+                Pattern(
+                    "JWT",
+                    r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}",
+                    0.97,
+                ),
+            ],
+            context=["bearer", "authorization", "token", "jwt", "access_token"],
+        ),
+        PatternRecognizer(
+            supported_entity="AWS_ACCESS_KEY",
+            supported_language="pt",
+            patterns=[
+                Pattern("AWS Access Key", r"AKIA[0-9A-Z]{16}", 0.99),
+                Pattern("AWS Secret Key", r"(?i)aws.{0,20}secret.{0,10}['\"]?[A-Za-z0-9/+=]{40}['\"]?", 0.90),
+            ],
+        ),
+        PatternRecognizer(
+            supported_entity="GITHUB_TOKEN",
+            supported_language="pt",
+            patterns=[
+                Pattern("GitHub PAT", r"gh[pousr]_[A-Za-z0-9]{36,}", 0.99),
+                Pattern("GitHub App Token", r"ghs_[A-Za-z0-9]{36,}", 0.99),
+            ],
+        ),
+        PatternRecognizer(
+            supported_entity="PRIVATE_KEY",
+            supported_language="pt",
+            patterns=[
+                Pattern(
+                    "PEM Private Key",
+                    r"-----BEGIN (RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----",
+                    0.99,
+                ),
+            ],
+        ),
+        PatternRecognizer(
+            supported_entity="CONNECTION_STRING",
+            supported_language="pt",
+            patterns=[
+                Pattern(
+                    "DB Connection String",
+                    r"(postgresql|postgres|mysql|mongodb(\+srv)?|redis|amqp|mssql|oracle)://[^\s\"'<>]{8,}",
+                    0.95,
+                ),
+            ],
+        ),
+        PatternRecognizer(
+            supported_entity="SECRET_IN_CONTEXT",
+            supported_language="pt",
+            patterns=[
+                Pattern(
+                    "Key=Value Secret",
+                    r"(?i)(api[_\-]?key|apikey|secret[_\-]?key|password|passwd|senha|token|bearer"
+                    r"|credential|auth[_\-]?token|access[_\-]?token|private[_\-]?key)\s*[=:]\s*"
+                    r"['\"]?[A-Za-z0-9_\-\.]{10,}['\"]?",
+                    0.80,
+                ),
+            ],
+            context=[
+                "authorization", "auth", "authenticate", "secret", "password",
+                "senha", "token", "key", "credential", "api",
+            ],
+        ),
     ]
 
     for r in recognizers:

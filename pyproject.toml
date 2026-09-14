@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "data-protection-plugins"
-version = "2.0.0"
+version = "3.0.0"
 description = "Plugins de integração Jira e Confluence para a plataforma Presidio PT — detecção e conformidade de dados pessoais (PII)."
 readme = "README.md"
 license = {text = "MIT"}
@@ -45,6 +45,17 @@ streamlit = [
     "pandas>=2.2",
     "numpy>=1.26",
     "plotly>=5.22",
+]
+attachments = [
+    "pdfminer.six>=20221105",
+    "python-docx>=1.1",
+    "openpyxl>=3.1",
+    "Pillow>=10.0",
+    "pytesseract>=0.3.10",
+    # pdf2image>=1.17 + poppler necessários para OCR de PDFs escaneados (opcional)
+]
+scheduling = [
+    "apscheduler>=3.10,<4.0",
 ]
 dev = [
     "ruff>=0.6",

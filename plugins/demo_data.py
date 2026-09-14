@@ -33,9 +33,85 @@ class ConfluenceDemoTrecho(TypedDict):
     page_url: str
 
 
+# ── Dados de projetos e spaces (para listagem sem conexão real) ───────────────
+
+JIRA_DEMO_PROJETOS: list[dict] = [
+    {"key": "PROJ",  "name": "Projeto Principal",          "count": 284},
+    {"key": "ALPHA", "name": "Alpha Payments Service",     "count": 156},
+    {"key": "BETA",  "name": "Beta Data Platform",         "count": 89},
+    {"key": "HR",    "name": "Recursos Humanos",           "count": 43},
+    {"key": "FIN",   "name": "Financeiro e Compliance",    "count": 31},
+    {"key": "OPS",   "name": "Operacoes e Infra",          "count": 22},
+]
+
+CONFLUENCE_DEMO_SPACES: list[dict] = [
+    {"key": "DS",   "name": "Data Science e Analytics",   "count": 142},
+    {"key": "ENG",  "name": "Engenharia de Software",     "count": 97},
+    {"key": "HR",   "name": "RH e Cultura Organizacional","count": 54},
+    {"key": "PROD", "name": "Produto e Design",           "count": 38},
+    {"key": "SEC",  "name": "Seguranca da Informacao",    "count": 19},
+]
+
+# ── Histórico executivo demo (6 meses de dados fictícios) ────────────────────
+# Simula evolução real: pico em março, queda progressiva após implantação da plataforma.
+
+EXEC_DEMO_HISTORICO: list[dict] = [
+    # mes_ano, fonte, projetos, total, alto, medio, baixo, secrets, compliance_score, entidades
+    {"mes_ano": "2025-04", "fonte": "Jira",       "projetos": "PROJ+ALPHA", "total_deteccoes": 312, "alto": 89,  "medio": 143, "baixo": 80,  "secrets": 47, "compliance_score": 41.2, "entidades": ["CPF","CPF","CNPJ","JWT_TOKEN","AWS_ACCESS_KEY","EMAIL_ADDRESS","PHONE_NUMBER","CPF","CNPJ","JWT_TOKEN"]},
+    {"mes_ano": "2025-04", "fonte": "Confluence", "projetos": "DS+ENG",     "total_deteccoes": 198, "alto": 52,  "medio": 91,  "baixo": 55,  "secrets": 31, "compliance_score": 39.5, "entidades": ["CPF","EMAIL_ADDRESS","CNPJ","PHONE_NUMBER","PRIVATE_KEY","CONNECTION_STRING","CPF","CEP"]},
+    {"mes_ano": "2025-05", "fonte": "Jira",       "projetos": "PROJ+ALPHA", "total_deteccoes": 287, "alto": 74,  "medio": 131, "baixo": 82,  "secrets": 39, "compliance_score": 45.8, "entidades": ["CPF","JWT_TOKEN","CNPJ","EMAIL_ADDRESS","AWS_ACCESS_KEY","PHONE_NUMBER","CPF","RG"]},
+    {"mes_ano": "2025-05", "fonte": "Confluence", "projetos": "DS+ENG",     "total_deteccoes": 161, "alto": 38,  "medio": 77,  "baixo": 46,  "secrets": 22, "compliance_score": 48.1, "entidades": ["CPF","EMAIL_ADDRESS","CNPJ","GITHUB_TOKEN","PHONE_NUMBER","CPF","CEP","CARTAO_CREDITO"]},
+    {"mes_ano": "2025-06", "fonte": "Jira",       "projetos": "PROJ+ALPHA+HR", "total_deteccoes": 241, "alto": 58, "medio": 112, "baixo": 71, "secrets": 28, "compliance_score": 54.3, "entidades": ["CPF","EMAIL_ADDRESS","JWT_TOKEN","CNPJ","PHONE_NUMBER","CPF","AWS_ACCESS_KEY","RG"]},
+    {"mes_ano": "2025-06", "fonte": "Confluence", "projetos": "DS+HR",      "total_deteccoes": 134, "alto": 29,  "medio": 64,  "baixo": 41,  "secrets": 17, "compliance_score": 57.0, "entidades": ["CPF","EMAIL_ADDRESS","CNPJ","PHONE_NUMBER","CEP","CPF","PRIVATE_KEY"]},
+    {"mes_ano": "2025-07", "fonte": "Jira",       "projetos": "PROJ+ALPHA+HR", "total_deteccoes": 189, "alto": 41, "medio": 90,  "baixo": 58,  "secrets": 19, "compliance_score": 63.7, "entidades": ["CPF","EMAIL_ADDRESS","CNPJ","JWT_TOKEN","PHONE_NUMBER","CPF","RG"]},
+    {"mes_ano": "2025-07", "fonte": "Confluence", "projetos": "DS+HR+ENG",  "total_deteccoes": 102, "alto": 18,  "medio": 51,  "baixo": 33,  "secrets": 11, "compliance_score": 66.2, "entidades": ["CPF","EMAIL_ADDRESS","CNPJ","PHONE_NUMBER","CEP","CPF"]},
+    {"mes_ano": "2025-08", "fonte": "Jira",       "projetos": "PROJ+ALPHA+HR", "total_deteccoes": 143, "alto": 27, "medio": 68,  "baixo": 48,  "secrets": 12, "compliance_score": 71.4, "entidades": ["CPF","EMAIL_ADDRESS","CNPJ","PHONE_NUMBER","CPF","RG","CEP"]},
+    {"mes_ano": "2025-08", "fonte": "Confluence", "projetos": "DS+HR+ENG",  "total_deteccoes": 78,  "alto": 11,  "medio": 38,  "baixo": 29,  "secrets": 6,  "compliance_score": 74.8, "entidades": ["CPF","EMAIL_ADDRESS","CNPJ","PHONE_NUMBER","CEP"]},
+    {"mes_ano": "2025-09", "fonte": "Jira",       "projetos": "PROJ+ALPHA+HR+FIN", "total_deteccoes": 98, "alto": 14, "medio": 47, "baixo": 37, "secrets": 7, "compliance_score": 78.9, "entidades": ["CPF","EMAIL_ADDRESS","CNPJ","PHONE_NUMBER","RG","CPF"]},
+    {"mes_ano": "2025-09", "fonte": "Confluence", "projetos": "DS+HR+ENG",  "total_deteccoes": 54,  "alto": 6,   "medio": 26,  "baixo": 22,  "secrets": 3,  "compliance_score": 81.3, "entidades": ["CPF","EMAIL_ADDRESS","PHONE_NUMBER","CEP","CNPJ"]},
+]
+
 # ── Jira demo ─────────────────────────────────────────────────────────────────
 
 JIRA_DEMO_TRECHOS: list[JiraDemoTrecho] = [
+    JiraDemoTrecho(
+        texto=(
+            "Integração com API de pagamentos configurada. "
+            "Token de acesso: Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+            ".eyJzdWIiOiJ1c2VyMTIzIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+        ),
+        autor="dev.backend@empresa.com.br",
+        campo="Descrição",
+        issue_key="PROJ-110",
+        issue_url="https://demo.atlassian.net/browse/PROJ-110",
+        issue_type="Task",
+        prioridade="Alta",
+    ),
+    JiraDemoTrecho(
+        texto=(
+            "String de conexão do banco de staging: "
+            "postgresql://admin:S3nh@Secreta123@db.staging.internal:5432/core_db"
+        ),
+        autor="infra.team@empresa.com.br",
+        campo="Comentário",
+        issue_key="PROJ-111",
+        issue_url="https://demo.atlassian.net/browse/PROJ-111",
+        issue_type="Bug",
+        prioridade="Alta",
+    ),
+    JiraDemoTrecho(
+        texto=(
+            "Deploy na AWS: aws_access_key_id = AKIAIOSFODNN7EXAMPLE, "
+            "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+        ),
+        autor="devops@empresa.com.br",
+        campo="Descrição",
+        issue_key="PROJ-112",
+        issue_url="https://demo.atlassian.net/browse/PROJ-112",
+        issue_type="Task",
+        prioridade="Alta",
+    ),
+
     JiraDemoTrecho(
         texto=(
             "Preciso atualizar o cadastro do cliente João Silva, "

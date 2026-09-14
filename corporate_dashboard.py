@@ -1,1096 +1,2181 @@
 """
-Corporate Executive Dashboard
+Data Protection Platform v3.0
 =================================
-Streamlit application with a pure corporate executive design.
-Paleta azul profissional, sem emojis, layout wide, dados fictícios cacheados.
+Plataforma corporativa de detecção de PII e secrets antes de agentes LLM
+consumirem dados de Jira e Confluence.
 
 Execução:
     python -m streamlit run corporate_dashboard.py
 """
 
-import streamlit as st
-import pandas as pd
-import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
+from __future__ import annotations
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 1. CONFIGURAÇÃO DE PÁGINA — deve ser a primeira chamada Streamlit
-# ─────────────────────────────────────────────────────────────────────────────
+import io
+from datetime import datetime, timezone
+
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
+
 st.set_page_config(
-    page_title="Corporate Analytics | Executive Dashboard",
+    page_title="Data Protection | PII & Secrets Scanner",
     page_icon=None,
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2. DESIGN TOKENS — paleta corporativa baseada em tons de azul
+# DESIGN TOKENS — dark theme conforme DESIGN.md
 # ─────────────────────────────────────────────────────────────────────────────
-BLUE_DARK   = "#1E3A8A"   # Azul Marinho Escuro — elementos principais / bordas de destaque
-BLUE_ROYAL  = "#3B82F6"   # Azul Royal Corporativo — série primária dos gráficos
-BLUE_MID    = "#2563EB"   # Azul intermediário — série secundária
-BLUE_LIGHT  = "#93C5FD"   # Azul Claro — destaques de dados / barras de comparação
-BLUE_PALE   = "#DBEAFE"   # Azul muito suave — preenchimento de área / hover
-BG_PAGE     = "#F8FAFC"   # Cinza Claro Azulado — fundo da página
-BG_WHITE    = "#FFFFFF"   # Branco Puro — containers / cards / sidebar
-TEXT_DARK   = "#0F172A"   # Grafite escuro — texto principal
-TEXT_MID    = "#475569"   # Slate — texto secundário / labels
-BORDER_CLR  = "#E2E8F0"   # Borda suave — separadores
-
-# Paleta sequencial para gráficos com múltiplas séries
-CHART_COLORS = [BLUE_ROYAL, BLUE_MID, "#60A5FA", BLUE_DARK, BLUE_LIGHT, "#1D4ED8"]
-
-# Data de referência simulada para o cabeçalho
-DATA_ATUALIZACAO = "12 de setembro de 2024"
+BD = "#1E3A8A"; BR = "#3B82F6"; BM = "#2563EB"; BL = "#93C5FD"
+BP = "#1E3A8A1A"; BPG = "#0B1121"; BPS = "#0F1729"; BPW = "#1A2332"
+BPB = "#0A1020"; TD = "#E2E8F0"; TM = "#94A3B8"; TMU = "#64748B"
+BOR = "#1E3A5F"; BORM = "#2D4A72"
+RD = "#EF4444"; RBG = "#DC262620"
+OD = "#F97316"; OBG = "#F9731620"
+GD = "#22C55E"; GBG = "#22C55E20"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. CSS GLOBAL — injeção via Markdown para cobertura total da UI
+# CSS GLOBAL
 # ─────────────────────────────────────────────────────────────────────────────
 st.markdown(f"""
 <style>
-  /* Importação da fonte Inter — tipografia corporativa neutra */
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
-  html, body, [class*="css"] {{
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    color: {TEXT_DARK};
-  }}
+html, body, [class*="css"] {{ font-family:'Inter',sans-serif; color:{TD}; }}
 
-  /* ── Fundo da página ── */
-  .stApp {{
-    background-color: {BG_PAGE};
-  }}
+.stApp {{ background:{BPG}; }}
 
-  /* ── Sidebar — fundo branco com divisor vertical ── */
-  section[data-testid="stSidebar"] {{
-    background-color: {BG_WHITE};
-    border-right: 1px solid {BORDER_CLR};
-    box-shadow: 2px 0 8px rgba(15,23,42,.04);
-  }}
-  section[data-testid="stSidebar"] .stMarkdown p {{
-    color: {TEXT_MID};
-    font-size: 12px;
-  }}
+/* Header: fundo transparente, só mantém o toggle do sidebar */
+header[data-testid="stHeader"] {{
+  background:{BPG} !important;
+  border-bottom:none !important;
+}}
+/* Oculta apenas o menu e botoes de toolbar — não o toggle */
+#MainMenu {{ display:none !important; }}
+[data-testid="stToolbarActions"] {{ display:none !important; }}
 
-  /* ── Padding do conteúdo principal ── */
-  .block-container {{
-    padding-top: 1.5rem;
-    padding-bottom: 2.5rem;
-    max-width: 100% !important;
-  }}
+/* ── Sidebar ── */
+section[data-testid="stSidebar"] {{
+  background:{BPB} !important;
+  border-right:1px solid {BOR} !important;
+  padding:0 !important;
+}}
+section[data-testid="stSidebar"] > div:first-child {{
+  padding:0 16px 16px !important;
+}}
 
-  /* ── Botões primários ── */
-  .stButton > button {{
-    background-color: {BLUE_DARK} !important;
-    color: {BG_WHITE} !important;
-    border: none !important;
-    border-radius: 6px !important;
-    font-size: 13px !important;
-    font-weight: 600 !important;
-    padding: 0.5rem 1.4rem !important;
-    letter-spacing: .2px !important;
-    transition: background-color .18s ease, box-shadow .18s ease;
-    box-shadow: 0 1px 3px rgba(15,23,42,.12);
-  }}
-  .stButton > button:hover {{
-    background-color: {BLUE_ROYAL} !important;
-    box-shadow: 0 2px 8px rgba(30,58,138,.25) !important;
-  }}
+/* Nav radio */
+section[data-testid="stSidebar"] [data-testid="stRadio"] > label {{
+  display:none !important;
+}}
+section[data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] {{
+  gap:2px !important;
+}}
+section[data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] {{
+  background:transparent !important;
+  border-radius:7px !important;
+  padding:7px 10px !important;
+  margin:1px 0 !important;
+  cursor:pointer !important;
+  transition:background .15s !important;
+  border-left:3px solid transparent !important;
+}}
+section[data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]:hover {{
+  background:{BPW} !important;
+}}
+section[data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked) {{
+  background:{BD}22 !important;
+  border-left:3px solid {BR} !important;
+}}
+/* Texto do item */
+section[data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] p {{
+  font-size:13px !important;
+  font-weight:500 !important;
+  color:{TM} !important;
+  margin:0 !important;
+}}
+section[data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked) p {{
+  color:{TD} !important;
+  font-weight:600 !important;
+}}
+/* Esconde o circulo do radio */
+section[data-testid="stSidebar"] div[data-baseweb="radio"] > div:first-child {{
+  display:none !important;
+}}
 
-  /* ── Botão de download — estilo secundário (outline) ── */
-  .stDownloadButton > button {{
-    background-color: {BG_WHITE} !important;
-    color: {BLUE_DARK} !important;
-    border: 1.5px solid {BLUE_DARK} !important;
-    border-radius: 6px !important;
-    font-weight: 600 !important;
-    font-size: 13px !important;
-    letter-spacing: .2px !important;
-    transition: all .18s ease;
-    box-shadow: 0 1px 2px rgba(15,23,42,.06);
-  }}
-  .stDownloadButton > button:hover {{
-    background-color: {BLUE_PALE} !important;
-    border-color: {BLUE_ROYAL} !important;
-    color: {BLUE_ROYAL} !important;
-  }}
+/* Garante que o botão de colapsar o sidebar fique visível */
+[data-testid="stSidebarCollapseButton"] {{
+  display:flex !important;
+  visibility:visible !important;
+}}
+[data-testid="stSidebarCollapseButton"] button {{
+  display:flex !important;
+  visibility:visible !important;
+  background:{BPW} !important;
+  border:1px solid {BOR} !important;
+  border-radius:6px !important;
+  color:{TM} !important;
+}}
 
-  /* ── Dataframe — borda, radius, hover refinado ── */
-  .stDataFrame > div {{
-    border: 1px solid {BORDER_CLR};
-    border-radius: 8px;
-    overflow: hidden;
-    box-shadow: 0 1px 3px rgba(15,23,42,.05);
-  }}
-  .stDataFrame > div > div > div > table thead th {{
-    background: {BG_PAGE} !important;
-    color: {TEXT_MID} !important;
-    font-weight: 600 !important;
-    font-size: 11px !important;
-    letter-spacing: .5px !important;
-    text-transform: uppercase !important;
-    border-bottom: 2px solid {BORDER_CLR} !important;
-    padding: 10px 14px !important;
-  }}
-  .stDataFrame > div > div > div > table tbody td {{
-    color: {TEXT_DARK} !important;
-    font-size: 12.5px !important;
-    padding: 9px 14px !important;
-    border-bottom: 1px solid {BORDER_CLR} !important;
-  }}
-  .stDataFrame > div > div > div > table tbody tr:hover td {{
-    background: {BLUE_PALE} !important;
-  }}
-  .stDataFrame > div > div > div > table tbody tr:last-child td {{
-    border-bottom: none !important;
-  }}
+.block-container {{ padding-top:1.25rem; padding-bottom:2.5rem; max-width:100% !important; }}
 
-  /* ── Inputs e selects na sidebar ── */
-  .stSelectbox label, .stMultiSelect label,
-  .stDateInput label, .stNumberInput label {{
-    color: {TEXT_DARK} !important;
-    font-size: 12px !important;
-    font-weight: 600 !important;
-  }}
+.stButton > button {{
+  background:{BD} !important; color:#fff !important; border:none !important;
+  border-radius:6px !important; font-size:13px !important; font-weight:600 !important;
+  padding:.45rem 1.25rem !important; letter-spacing:.2px !important;
+  transition:background .15s,box-shadow .15s;
+}}
+.stButton > button:hover {{ background:{BR} !important; box-shadow:0 2px 8px rgba(59,130,246,.35) !important; }}
 
-  /* ── Radio na sidebar — opções visíveis ── */
-  div[data-testid="stRadio"] div[role="radiogroup"] label p {{
-    color: {TEXT_DARK} !important;
-    font-size: 13px !important;
-    font-weight: 400 !important;
-    margin: 0 !important;
-  }}
-  div[data-testid="stRadio"] div[role="radiogroup"] label {{
-    gap: 8px !important;
-    padding: 5px 0 !important;
-  }}
+.stDownloadButton > button {{
+  background:{BPW} !important; color:{BR} !important;
+  border:1.5px solid {BOR} !important; border-radius:6px !important;
+  font-weight:600 !important; font-size:13px !important;
+}}
+.stDownloadButton > button:hover {{ border-color:{BR} !important; }}
 
-  /* ── Divisor horizontal padrão ── */
-  hr {{
-    border: none;
-    border-top: 1px solid {BORDER_CLR};
-    margin: 0.5rem 0 1rem;
-  }}
+.stDataFrame > div {{ border:1px solid {BOR}; border-radius:8px; overflow:hidden; }}
+.stDataFrame thead th {{
+  background:{BPS} !important; color:{TM} !important;
+  font-size:11px !important; font-weight:700 !important;
+  text-transform:uppercase !important; letter-spacing:.5px !important;
+  border-bottom:1px solid {BORM} !important; padding:10px 14px !important;
+}}
+.stDataFrame tbody td {{
+  color:{TD} !important; font-size:12.5px !important;
+  padding:9px 14px !important; border-bottom:1px solid {BOR} !important;
+}}
 
-  /* ── Títulos de seção da sidebar ── */
-  .sb-title {{
-    font-size: 10px;
-    font-weight: 700;
-    color: {TEXT_MID};
-    text-transform: uppercase;
-    letter-spacing: .7px;
-    padding: 14px 0 6px;
-    border-bottom: 1px solid {BORDER_CLR};
-    margin-bottom: 8px;
-  }}
+.stTextArea textarea, .stTextInput input {{
+  background:{BPW} !important; color:{TD} !important;
+  border:1px solid {BOR} !important; border-radius:6px !important;
+  font-family:'Inter',sans-serif !important; font-size:13px !important;
+}}
+.stTextArea textarea:focus, .stTextInput input:focus {{
+  border-color:{BR} !important; box-shadow:0 0 0 2px rgba(59,130,246,.2) !important;
+}}
+.stSelectbox > div > div, .stMultiSelect > div > div {{
+  background:{BPW} !important; border:1px solid {BOR} !important;
+  border-radius:6px !important; color:{TD} !important;
+}}
+label, .stSelectbox label, .stMultiSelect label,
+.stTextInput label, .stTextArea label, .stRadio label,
+.stCheckbox label span {{
+  color:{TM} !important; font-size:12px !important; font-weight:600 !important;
+}}
 
-  /* ── Container branco genérico ── */
-  .white-card {{
-    background: {BG_WHITE};
-    border: 1px solid {BORDER_CLR};
-    border-radius: 8px;
-    padding: 20px 22px;
-    box-shadow: 0 1px 3px rgba(15,23,42,.06);
-    margin-bottom: 1rem;
-  }}
+div[data-testid="stTabs"] button[role="tab"] {{
+  color:{TM} !important; font-size:13px !important; font-weight:500 !important;
+  background:transparent !important; border-radius:6px 6px 0 0 !important;
+  padding:8px 18px !important;
+}}
+div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {{
+  color:{BR} !important; font-weight:700 !important;
+  border-bottom:2px solid {BR} !important;
+}}
 
-  /* ── Section header — refinado ── */
-  .sec-hdr {{
-    font-size: 11px;
-    font-weight: 700;
-    color: {TEXT_MID};
-    text-transform: uppercase;
-    letter-spacing: .6px;
-    padding-bottom: 8px;
-    border-bottom: 2px solid {BLUE_DARK};
-    margin: 1.75rem 0 1rem;
-    display: inline-block;
-  }}
-  .sec-hdr-sm {{
-    font-size: 10.5px;
-    font-weight: 700;
-    color: {TEXT_MID};
-    text-transform: uppercase;
-    letter-spacing: .7px;
-    padding-bottom: 6px;
-    border-bottom: 1px solid {BORDER_CLR};
-    margin: 1.25rem 0 .75rem;
-    display: inline-block;
-  }}
+div[data-testid="stExpander"] {{
+  background:{BPW} !important; border:1px solid {BOR} !important;
+  border-radius:8px !important;
+}}
+div[data-testid="stExpander"] summary {{ color:{TD} !important; font-weight:600 !important; }}
 
-  /* ── KPI card — refinado ── */
-  .kpi-card {{
-    background: {BG_WHITE};
-    border: 1px solid {BORDER_CLR};
-    border-top: 4px solid {BLUE_DARK};
-    border-radius: 8px;
-    padding: 18px 22px 16px;
-    box-shadow: 0 1px 4px rgba(15,23,42,.07);
-    transition: border-color .15s, box-shadow .15s;
-  }}
-  .kpi-card:hover {{
-    border-color: {BLUE_LIGHT};
-    box-shadow: 0 2px 8px rgba(15,23,42,.10);
-  }}
-  .kpi-label {{
-    font-size: 10.5px;
-    font-weight: 700;
-    color: {TEXT_MID};
-    text-transform: uppercase;
-    letter-spacing: .7px;
-    margin-bottom: 10px;
-  }}
-  .kpi-value {{
-    font-size: 30px;
-    font-weight: 700;
-    color: {TEXT_DARK};
-    line-height: 1;
-    margin-bottom: 6px;
-    letter-spacing: -.5px;
-  }}
-  .kpi-sub {{ font-size: 11px; font-weight: 500; color: {TEXT_MID}; }}
-  .kpi-info .kpi-value {{ color: {BLUE_ROYAL}; }}
-  .kpi-success .kpi-value {{ color: "#16A34A"; }}
-  .kpi-danger .kpi-value {{ color: "#DC2626"; }}
+hr {{ border:none; border-top:1px solid {BOR}; margin:.5rem 0 1rem; }}
 
-  /* ── Empty state ── */
-  .empty-state {{
-    background: {BG_WHITE};
-    border: 1px solid {BORDER_CLR};
-    border-radius: 8px;
-    padding: 36px 20px;
-    text-align: center;
-    color: {TEXT_MID};
-    margin: 2rem 0;
-  }}
-  .empty-state strong {{
-    color: {TEXT_DARK};
-    font-size: 14px;
-    display: block;
-    margin-bottom: 6px;
-  }}
+.kpi-card {{
+  background:{BPW}; border:1px solid {BOR}; border-top:3px solid {BR};
+  border-radius:8px; padding:16px 18px 14px;
+  box-shadow:0 1px 4px rgba(0,0,0,.25);
+}}
+.kpi-card-danger  {{ border-top-color:{RD} !important; }}
+.kpi-card-warning {{ border-top-color:{OD} !important; }}
+.kpi-card-success {{ border-top-color:{GD} !important; }}
+.kpi-label {{ font-size:10px; font-weight:700; color:{TM}; text-transform:uppercase; letter-spacing:.7px; margin-bottom:10px; }}
+.kpi-value {{ font-size:28px; font-weight:700; color:{TD}; line-height:1; letter-spacing:-.5px; margin-bottom:5px; }}
+.kpi-sub   {{ font-size:11px; color:{TMU}; }}
 
-  /* ── Tabs ── */
-  div[data-testid="stTabs"] button[role="tab"] {{
-    color: {TEXT_MID} !important;
-    font-size: 13px !important;
-    font-weight: 500 !important;
-    background: transparent !important;
-    padding: 8px 16px !important;
-    border-radius: 6px 6px 0 0 !important;
-  }}
-  div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {{
-    color: {BLUE_DARK} !important;
-    font-weight: 600 !important;
-    background: {BG_WHITE} !important;
-  }}
+.badge-high   {{ background:{RBG}; color:{RD}; border:1px solid {RD}; border-radius:4px; padding:3px 10px; font-size:11px; font-weight:700; }}
+.badge-medium {{ background:{OBG}; color:{OD}; border:1px solid {OD}; border-radius:4px; padding:3px 10px; font-size:11px; font-weight:700; }}
+.badge-low    {{ background:{GBG}; color:{GD}; border:1px solid {GD}; border-radius:4px; padding:3px 10px; font-size:11px; font-weight:700; }}
+.badge-secret {{ background:rgba(139,92,246,.15); color:#A78BFA; border:1px solid #7C3AED; border-radius:4px; padding:3px 10px; font-size:11px; font-weight:700; }}
 
-  /* ── Alertas ── */
-  div[data-testid="stAlert"][data-baseweb="notification"] {{
-    border-radius: 8px !important;
-  }}
-
-  /* ── Form container ── */
-  div[data-testid="stForm"] {{
-    background: {BG_WHITE} !important;
-    border: 1px solid {BORDER_CLR} !important;
-    border-radius: 8px !important;
-    padding: 1.25rem !important;
-    box-shadow: 0 1px 3px rgba(15,23,42,.05) !important;
-  }}
-
-  /* ── Link buttons ── */
-  a[data-testid="stLinkButton"] > button {{
-    background-color: {BG_WHITE} !important;
-    color: {BLUE_DARK} !important;
-    border: 1.5px solid {BLUE_DARK} !important;
-    border-radius: 6px !important;
-    font-weight: 600 !important;
-    font-size: 12px !important;
-    transition: all .18s;
-  }}
-  a[data-testid="stLinkButton"] > button:hover {{
-    background-color: {BLUE_PALE} !important;
-    border-color: {BLUE_ROYAL} !important;
-    color: {BLUE_ROYAL} !important;
-  }}
+.sec-hdr {{
+  font-size:11px; font-weight:700; color:{TM}; text-transform:uppercase;
+  letter-spacing:.6px; padding-bottom:8px; border-bottom:2px solid {BD};
+  margin:1.75rem 0 1rem; display:inline-block;
+}}
+.anon-panel {{
+  background:{BPG}; border:1px solid {BOR}; border-radius:8px;
+  font-family:'JetBrains Mono',monospace; font-size:12.5px;
+  color:{TD}; padding:14px; line-height:1.7; white-space:pre-wrap;
+  min-height:120px; max-height:400px; overflow-y:auto;
+}}
+.report-card {{
+  background:{BPW}; border:1px solid {BOR}; border-left:4px solid {BR};
+  border-radius:8px; padding:20px 24px; margin-top:1rem;
+}}
+.hist-item {{
+  background:{BPW}; border:1px solid {BOR}; border-left:3px solid {BORM};
+  border-radius:6px; padding:9px 11px; margin-bottom:5px;
+  font-size:11px; color:{TM};
+}}
+.sb-title {{
+  font-size:10px; font-weight:700; color:{TMU}; text-transform:uppercase;
+  letter-spacing:.8px; padding:18px 0 8px; margin-bottom:4px;
+}}
 </style>
 """, unsafe_allow_html=True)
 
-
 # ─────────────────────────────────────────────────────────────────────────────
-# 4. GERACAO DE DADOS FICTICIOS COM CACHE
+# INICIALIZAÇÃO DE SESSION STATE
 # ─────────────────────────────────────────────────────────────────────────────
-
-@st.cache_data(show_spinner="Carregando base de dados corporativa...")
-def carregar_dados() -> pd.DataFrame:
-    rng = np.random.default_rng(seed=42)
-
-    meses     = pd.date_range("2023-01-01", "2024-12-01", freq="MS")
-    regioes   = ["Norte", "Sul", "Leste", "Oeste"]
-    unidades  = ["Varejo", "Corporativo", "Industrial"]
-
-    base_receita = {"Varejo": 1_200_000, "Corporativo": 2_100_000, "Industrial": 1_700_000}
-    peso_regiao  = {"Norte": 0.85, "Sul": 1.22, "Leste": 1.10, "Oeste": 0.92}
-    sazo = {
-        1: 0.91, 2: 0.94, 3: 0.97, 4: 1.00,
-        5: 1.02, 6: 1.04, 7: 1.03, 8: 1.05,
-        9: 1.07, 10: 1.09, 11: 1.11, 12: 1.15,
+def _init_state() -> None:
+    defaults: dict = {
+        "jira_plugin": None,
+        "confluence_plugin": None,
+        "jira_resultados": [],
+        "jira_metricas": {},
+        "jira_projetos": [],            # list[dict] com key/name/count
+        "jira_proj_selecionados": [],   # [] = todos
+        "confluence_resultados": [],
+        "confluence_metricas": {},
+        "confluence_spaces": [],
+        "confluence_spaces_selecionados": [],
+        "texto_resultados": [],
+        "texto_metricas": {},
+        "scan_history": [],
+        "analyzer": None,
+        "acoes_modo": "readonly",       # modo selecionado na aba Acoes
+        "scrub_preview": [],            # lista de preview por issue
+        "scrub_issue_selecionada": "",
     }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
 
-    n_periodos = len(meses)
-    registros  = []
-
-    for i, mes in enumerate(meses):
-        fator_crescimento = 1.0 + (i / n_periodos) * 0.15
-        for ub in unidades:
-            for reg in regioes:
-                base = base_receita[ub] * peso_regiao[reg]
-                receita = (
-                    base
-                    * fator_crescimento
-                    * sazo[mes.month]
-                    * (1.0 + rng.normal(0, 0.048))
-                )
-                meta      = receita * (1.0 + rng.uniform(0.05, 0.12))
-                margem    = rng.uniform(18.0, 38.0)
-                clientes  = max(int(receita / 44_000 + rng.normal(0, 2.5)), 1)
-                negocios  = max(int(clientes * rng.uniform(0.28, 0.58)), 0)
-
-                registros.append({
-                    "Data":            mes,
-                    "Ano":             mes.year,
-                    "Mes":             mes.month,
-                    "Periodo":         mes.strftime("%b %Y"),
-                    "Regiao":          reg,
-                    "Unidade_Negocio": ub,
-                    "Receita":         round(receita, 2),
-                    "Meta":            round(meta, 2),
-                    "Margem_Pct":      round(margem, 2),
-                    "Clientes_Ativos": clientes,
-                    "Negociacoes":     negocios,
-                })
-
-    df = pd.DataFrame(registros)
-    df["Atingimento_Pct"] = (df["Receita"] / df["Meta"] * 100).round(2)
-    return df
-
+_init_state()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. FUNCOES AUXILIARES
+# ANALYZER — cache pesado (spaCy + Presidio)
 # ─────────────────────────────────────────────────────────────────────────────
+@st.cache_resource(show_spinner="Carregando modelos de linguagem...")
+def _build_analyzer():
+    from presidio_pt import build_analyzer
+    return build_analyzer()
 
-def fmt_moeda(valor: float) -> str:
-    if valor >= 1_000_000:
-        return f"R$ {valor / 1_000_000:.2f}M"
-    if valor >= 1_000:
-        return f"R$ {valor / 1_000:.1f}K"
-    return f"R$ {valor:,.0f}"
-
-
-def fmt_pct(valor: float, casas: int = 1) -> str:
-    return f"{valor:.{casas}f}%"
+def get_analyzer():
+    if st.session_state.analyzer is None:
+        st.session_state.analyzer = _build_analyzer()
+    return st.session_state.analyzer
 
 
-def kpi_card(col, titulo: str, valor: str, legenda: str, cor_legenda: str = None) -> None:
-    cor = cor_legenda or TEXT_MID
+@st.cache_resource(show_spinner=False)
+def get_scheduler():
+    from plugins.scheduler import ScanScheduler
+    sched = ScanScheduler()
+    sched.start()
+    return sched
+
+
+# ── Modo cards: metadata para a aba Acoes ────────────────────────────────────
+_MODO_INFO = {
+    "readonly": {
+        "titulo": "Apenas Visualizar",
+        "para_quem": "Quero revisar os resultados sem alterar nada",
+        "o_que_faz": "Nenhuma acao e executada no Jira. Use para entender o problema antes de decidir.",
+        "quem_ve": "Apenas voce, no dashboard",
+        "consequencia": "Nenhuma alteracao no Jira",
+        "cor": TMU,
+        "risco_label": "",
+        "risco_bg": "",
+    },
+    "properties": {
+        "titulo": "Registrar Internamente",
+        "para_quem": "Quero rastrear sem aparecer para o time",
+        "o_que_faz": "Salva um resumo tecnico nos metadados do card (Issue Properties). Outros usuarios nao verao absolutamente nada diferente no Jira.",
+        "quem_ve": "Invisivel na UI do Jira — apenas via API ou relatorios",
+        "consequencia": "Registro interno, sem impacto visual no Jira",
+        "cor": BR,
+        "risco_label": "",
+        "risco_bg": "",
+    },
+    "label": {
+        "titulo": "Adicionar Etiqueta",
+        "para_quem": "Quero sinalizar o card para o time tratar",
+        "o_que_faz": "Adiciona etiquetas como PII-HIGH ou SECRET-DETECTED no card. O time ve no board e pode filtrar.",
+        "quem_ve": "Todos com acesso ao projeto verao as etiquetas",
+        "consequencia": "Etiquetas visiveis no card — o time ve",
+        "cor": OD,
+        "risco_label": "VISIVEL",
+        "risco_bg": OBG,
+    },
+    "comment": {
+        "titulo": "Adicionar Comentario",
+        "para_quem": "Quero deixar um registro publico de auditoria",
+        "o_que_faz": "Adiciona comentario publico no historico do card (valores sempre mascarados). Fica permanente no historico.",
+        "quem_ve": "Todos com acesso ao card, para sempre no historico",
+        "consequencia": "Comentario no historico publico — permanente",
+        "cor": OD,
+        "risco_label": "HISTORICO",
+        "risco_bg": OBG,
+    },
+    "scrub": {
+        "titulo": "Remover Dados Sensiveis",
+        "para_quem": "Quero apagar os dados do card permanentemente",
+        "o_que_faz": "Substitui os dados detectados por [TIPO_DADO] diretamente no texto do card. ATENCAO: o texto original sera perdido e nao pode ser recuperado.",
+        "quem_ve": "Todos verao o texto alterado. O historico de edicao mostra quem editou.",
+        "consequencia": "IRREVERSIVEL — texto do card alterado permanentemente",
+        "cor": RD,
+        "risco_label": "IRREVERSIVEL",
+        "risco_bg": RBG,
+    },
+}
+
+
+def _render_modo_card(modo: str, selecionado: bool, disabled: bool = False) -> None:
+    info = _MODO_INFO[modo]
+    borda = f"2px solid {info['cor']}" if selecionado else f"1px solid {BOR}"
+    bg = f"{info['cor']}18" if selecionado else BPW
+    op = "0.45" if disabled else "1"
+
+    badge_html = ""
+    if info["risco_label"]:
+        badge_html = (
+            f'<span style="background:{info["risco_bg"]};color:{info["cor"]};'
+            f'border:1px solid {info["cor"]};border-radius:3px;padding:2px 7px;'
+            f'font-size:10px;font-weight:700;letter-spacing:.4px;">{info["risco_label"]}</span>'
+        )
+
+    st.markdown(f"""
+    <div style="background:{bg};border:{borda};border-radius:10px;
+      padding:14px 16px;opacity:{op};margin-bottom:2px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <div style="font-size:13px;font-weight:700;color:{TD};">{info['titulo']}</div>
+        {badge_html}
+      </div>
+      <div style="font-size:11.5px;color:{TM};font-style:italic;margin-bottom:7px;">{info['para_quem']}</div>
+      <div style="font-size:11px;color:{TM};margin-bottom:9px;line-height:1.55;">{info['o_que_faz']}</div>
+      <div style="display:flex;gap:12px;font-size:10px;flex-wrap:wrap;">
+        <span style="color:{TMU};"><b style="color:{TM};">Quem ve:</b> {info['quem_ve']}</span>
+      </div>
+      <div style="margin-top:8px;padding-top:7px;border-top:1px solid {BOR}35;">
+        <span style="font-size:10px;font-weight:700;color:{info['cor']};
+          text-transform:uppercase;letter-spacing:.5px;">{info['consequencia']}</span>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+    if not disabled:
+        label = "Selecionado" if selecionado else "Selecionar"
+        if st.button(label, key=f"btn_modo_{modo}", use_container_width=True, disabled=selecionado):
+            st.session_state.acoes_modo = modo
+            st.rerun()
+
+
+def _render_projetos_tabela(projetos: list[dict]) -> None:
+    if not projetos:
+        return
+    max_c = max((p.get("count", 0) for p in projetos), default=1) or 1
+    linhas = []
+    for p in projetos:
+        c = p.get("count", 0)
+        barras = "█" * max(1, round(c / max_c * 18)) + "░" * (18 - max(1, round(c / max_c * 18)))
+        linhas.append({
+            "Chave": p["key"],
+            "Nome": p["name"],
+            "Cards": c if c >= 0 else "—",
+            "Volume": f"{barras}  {c:,}" if c >= 0 else "—",
+        })
+    df_p = pd.DataFrame(linhas)
+    st.dataframe(df_p, use_container_width=True, hide_index=True)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HELPERS DE UI
+# ─────────────────────────────────────────────────────────────────────────────
+def kpi(col, titulo: str, valor: str, sub: str, variante: str = "") -> None:
+    cls = f"kpi-card {f'kpi-card-{variante}' if variante else ''}"
     col.markdown(f"""
-    <div class="kpi-card">
+    <div class="{cls}">
       <div class="kpi-label">{titulo}</div>
       <div class="kpi-value">{valor}</div>
-      <div class="kpi-sub" style="color:{cor};">{legenda}</div>
+      <div class="kpi-sub">{sub}</div>
     </div>
     """, unsafe_allow_html=True)
 
 
-def aplicar_layout_plotly(fig: go.Figure, height: int = 380) -> go.Figure:
-    fig.update_layout(
-        height=height,
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
-        font=dict(family="Inter, sans-serif", color=TEXT_DARK, size=12),
-        margin=dict(l=4, r=4, t=40, b=4),
-        legend=dict(
-            orientation="h",
-            yanchor="bottom", y=1.02,
-            xanchor="right",  x=1,
-            bgcolor="rgba(0,0,0,0)",
-            borderwidth=0,
-            font=dict(size=11, color=TEXT_MID),
-        ),
-        xaxis=dict(
-            gridcolor="rgba(0,0,0,0)",
-            linecolor=BORDER_CLR,
-            tickfont=dict(size=11, color=TEXT_MID),
-            title_font=dict(size=12, color=TEXT_MID),
-        ),
-        yaxis=dict(
-            gridcolor=BORDER_CLR,
-            gridwidth=1,
-            linecolor="rgba(0,0,0,0)",
-            tickfont=dict(size=11, color=TEXT_MID),
-            title_font=dict(size=12, color=TEXT_MID),
-        ),
-        hoverlabel=dict(
-            bgcolor=BG_WHITE,
-            bordercolor=BORDER_CLR,
-            font=dict(size=12, color=TEXT_DARK),
-        ),
-    )
-    return fig
-
-
-def secao_titulo(titulo: str, descricao: str = "") -> None:
-    desc_html = (
-        f'<p style="font-size:13px;color:{TEXT_MID};margin:2px 0 0;">{descricao}</p>'
-        if descricao else ""
-    )
+def compliance_bar(score: int) -> None:
+    cor = RD if score < 60 else (OD if score < 80 else GD)
+    label = "Critico" if score < 60 else ("Atencao" if score < 80 else "Conforme")
     st.markdown(f"""
-    <div style="margin-bottom:.75rem;">
-      <h2 style="font-size:15px;font-weight:700;color:{TEXT_DARK};
-        margin:0;letter-spacing:-.2px;">{titulo}</h2>
-      {desc_html}
-    </div>
-    <hr>
-    """, unsafe_allow_html=True)
-
-
-def container_grafico(conteudo_fn, *args, **kwargs) -> None:
-    with st.container():
-        st.markdown(f"""
-        <div style="background:{BG_WHITE};border:1px solid {BORDER_CLR};
-          border-radius:8px;padding:18px 18px 4px;
-          box-shadow:0 1px 3px rgba(15,23,42,.05);margin-bottom:1rem;">
-        """, unsafe_allow_html=True)
-        conteudo_fn(*args, **kwargs)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 6. CARREGAMENTO DOS DADOS BASE
-# ─────────────────────────────────────────────────────────────────────────────
-
-df_base = carregar_dados()
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 7. BARRA LATERAL — Logo, Navegacao e Filtros Globais
-# ─────────────────────────────────────────────────────────────────────────────
-
-with st.sidebar:
-
-    # Logo corporativo
-    st.markdown(f"""
-    <div style="padding:18px 0 16px;border-bottom:1px solid {BORDER_CLR};">
-      <div style="
-        background: linear-gradient(135deg, {BLUE_DARK} 0%, {BLUE_ROYAL} 100%);
-        border-radius: 8px; padding: 14px 16px; text-align: center;
-      ">
-        <div style="font-size:13px;font-weight:700;color:{BG_WHITE};
-          letter-spacing:.6px;line-height:1.2;">CORP ANALYTICS</div>
-        <div style="font-size:10px;color:{BLUE_LIGHT};margin-top:3px;
-          letter-spacing:.4px;font-weight:400;">Executive Intelligence Platform</div>
+    <div style="margin:1rem 0 1.5rem;">
+      <div style="display:flex;justify-content:space-between;
+        font-size:11px;color:{TM};font-weight:600;margin-bottom:6px;">
+        <span>COMPLIANCE SCORE — {label}</span>
+        <span style="color:{cor};font-size:15px;font-weight:700;">{score}%</span>
+      </div>
+      <div style="background:{BPG};border:1px solid {BOR};border-radius:99px;height:6px;">
+        <div style="width:{score}%;height:100%;border-radius:99px;
+          background:{cor};transition:width .4s ease;"></div>
       </div>
     </div>
     """, unsafe_allow_html=True)
 
-    # Menu de navegacao
-    st.markdown(f'<div class="sb-title">Navegação</div>', unsafe_allow_html=True)
+
+def sec_hdr(titulo: str) -> None:
+    st.markdown(f'<div class="sec-hdr">{titulo}</div>', unsafe_allow_html=True)
+
+
+def badge(nivel: str) -> str:
+    cls = {"HIGH": "badge-high", "MEDIUM": "badge-medium", "LOW": "badge-low"}.get(nivel, "badge-low")
+    label = {"HIGH": "ALTO", "MEDIUM": "MEDIO", "LOW": "BAIXO"}.get(nivel, nivel)
+    return f'<span class="{cls}">{label}</span>'
+
+
+def badge_secret() -> str:
+    return '<span class="badge-secret">SECRET</span>'
+
+
+def _plot_dark(fig: go.Figure, height: int = 340) -> go.Figure:
+    fig.update_layout(
+        height=height,
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="Inter,sans-serif", color=TD, size=12),
+        margin=dict(l=4, r=4, t=36, b=4),
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.02,
+            xanchor="right", x=1, bgcolor="rgba(0,0,0,0)",
+            font=dict(size=11, color=TM),
+        ),
+        xaxis=dict(gridcolor=BOR, linecolor=BOR, tickfont=dict(size=11, color=TM)),
+        yaxis=dict(gridcolor=BOR, linecolor="rgba(0,0,0,0)", tickfont=dict(size=11, color=TM)),
+        hoverlabel=dict(bgcolor=BPW, bordercolor=BOR, font=dict(size=12, color=TD)),
+    )
+    return fig
+
+
+def _add_history(tipo: str, key: str, m: dict) -> None:
+    _alto = m.get("por_nivel", {}).get("HIGH", 0)
+    _medio = m.get("por_nivel", {}).get("MEDIUM", 0)
+    _baixo = m.get("por_nivel", {}).get("LOW", 0)
+    _secrets = m.get("total_secrets", 0)
+    _total = m.get("total_deteccoes", 0)
+    _score = m.get("compliance_score", 0.0)
+    _ents = [d.get("entidade", "") for d in m.get("por_entidade", []) if d.get("entidade")]
+
+    st.session_state.scan_history.insert(0, {
+        "tipo": tipo, "key": key,
+        "hora": datetime.now(timezone.utc).strftime("%H:%M"),
+        "total": _total,
+        "alto": _alto,
+        "secrets": _secrets,
+    })
+    st.session_state.scan_history = st.session_state.scan_history[:10]
+
+    if tipo.lower() != "demo":
+        try:
+            from plugins.scan_state import ScanStateStore as _SSS
+            _SSS().salvar_execucao(
+                fonte=tipo, projetos=key,
+                total=_total, alto=_alto, medio=_medio,
+                baixo=_baixo, secrets=_secrets,
+                compliance_score=float(_score), entidades=_ents,
+            )
+        except Exception:
+            pass
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CHARTS
+# ─────────────────────────────────────────────────────────────────────────────
+def chart_donut(metricas: dict) -> go.Figure:
+    pn = metricas.get("por_nivel", {})
+    valores = [pn.get("HIGH", 0), pn.get("MEDIUM", 0), pn.get("LOW", 0)]
+    labels = ["Alto", "Medio", "Baixo"]
+    cores = [RD, OD, GD]
+    fig = go.Figure(go.Pie(
+        labels=labels, values=valores, hole=0.60,
+        marker=dict(colors=cores, line=dict(color=BPG, width=2)),
+        textfont=dict(size=11, color=TD),
+        hovertemplate="<b>%{label}</b><br>%{value} deteccoes<br>%{percent}<extra></extra>",
+    ))
+    fig.update_layout(
+        showlegend=True,
+        legend=dict(orientation="h", y=-0.15, x=0.5, xanchor="center",
+                    font=dict(size=11, color=TM)),
+        annotations=[dict(
+            text=f"<b>{metricas.get('total_deteccoes', 0)}</b>",
+            x=0.5, y=0.5, font=dict(size=22, color=TD), showarrow=False,
+        )],
+    )
+    return _plot_dark(fig, height=280)
+
+
+def chart_entity_bars(metricas: dict) -> go.Figure:
+    from plugins.risk_scorer import score_nivel
+    pe = metricas.get("por_entidade", {})
+    top = list(pe.items())[:8]
+    if not top:
+        return go.Figure()
+    nomes = [t[0] for t in top]
+    vals = [t[1] for t in top]
+    cores = []
+    for n in nomes:
+        nv = score_nivel(n)
+        cores.append(RD if nv == "HIGH" else (OD if nv == "MEDIUM" else GD))
+    fig = go.Figure(go.Bar(
+        y=nomes, x=vals, orientation="h",
+        marker=dict(color=cores, line=dict(width=0)),
+        hovertemplate="<b>%{y}</b><br>%{x} ocorrencias<extra></extra>",
+    ))
+    fig.update_layout(yaxis=dict(autorange="reversed"))
+    return _plot_dark(fig, height=280)
+
+
+def chart_framework_bars(metricas: dict) -> None:
+    from plugins.frameworks import frameworks_impactados
+    from plugins.scanner import ResultadoChunk
+    resultados = (
+        st.session_state.get("jira_resultados") or
+        st.session_state.get("confluence_resultados") or
+        st.session_state.get("texto_resultados") or []
+    )
+    registros = [
+        {"entidade": d.entidade}
+        for r in resultados
+        for d in r.deteccoes
+    ]
+    fw_count = frameworks_impactados(registros)
+    top = list(fw_count.items())[:6]
+    if not top:
+        st.markdown(f'<p style="color:{TMU};font-size:12px;">Sem dados</p>', unsafe_allow_html=True)
+        return
+    total = max(v for _, v in top)
+    for fw, cnt in top:
+        pct = int(cnt / total * 100) if total > 0 else 0
+        st.markdown(f"""
+        <div style="margin-bottom:10px;">
+          <div style="display:flex;justify-content:space-between;
+            font-size:11px;color:{TM};margin-bottom:4px;">
+            <span style="font-weight:600;">{fw}</span>
+            <span>{cnt}</span>
+          </div>
+          <div style="background:{BOR};border-radius:4px;height:5px;">
+            <div style="width:{pct}%;height:100%;border-radius:4px;background:{BR};"></div>
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RENDER RESULTADOS (reutilizável)
+# ─────────────────────────────────────────────────────────────────────────────
+def render_resultados(
+    resultados: list,
+    metricas: dict,
+    source_label: str,
+) -> None:
+    if not resultados:
+        st.markdown(f"""
+        <div style="background:{BPW};border:1px solid {BOR};border-radius:8px;
+          padding:36px;text-align:center;color:{TM};margin:2rem 0;">
+          <div style="font-size:14px;font-weight:600;color:{TD};margin-bottom:6px;">
+            Nenhum resultado disponivel
+          </div>
+          Execute a varredura para ver as deteccoes.
+        </div>
+        """, unsafe_allow_html=True)
+        return
+
+    pn = metricas.get("por_nivel", {})
+    total = metricas.get("total_deteccoes", 0)
+    secrets = metricas.get("total_secrets", 0)
+    score = metricas.get("compliance_score", 100)
+
+    # KPIs
+    k1, k2, k3, k4, k5, k6 = st.columns(6)
+    kpi(k1, "Total Deteccoes", str(total), f"{source_label}")
+    kpi(k2, "Risco Alto", str(pn.get("HIGH", 0)), "HIGH", "danger")
+    kpi(k3, "Risco Medio", str(pn.get("MEDIUM", 0)), "MEDIUM", "warning")
+    kpi(k4, "Risco Baixo", str(pn.get("LOW", 0)), "LOW", "success")
+    kpi(k5, "Secrets", str(secrets), "JWT / API Key / Senha", "danger" if secrets > 0 else "")
+    kpi(k6, "Compliance", f"{score}%", "Score calculado", "danger" if score < 60 else ("warning" if score < 80 else "success"))
+
+    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+    compliance_bar(score)
+
+    # Charts
+    c1, c2, c3 = st.columns(3, gap="large")
+    with c1:
+        sec_hdr("Distribuicao de Risco")
+        st.plotly_chart(chart_donut(metricas), use_container_width=True)
+    with c2:
+        sec_hdr("Top Entidades Detectadas")
+        st.plotly_chart(chart_entity_bars(metricas), use_container_width=True)
+    with c3:
+        sec_hdr("Frameworks Impactados")
+        chart_framework_bars(metricas)
+
+    # Tabela com filtros
+    sec_hdr("Deteccoes Detalhadas")
+    f1, f2, _ = st.columns([2, 3, 3])
+    with f1:
+        filtro_nivel = st.selectbox(
+            "Nivel de risco",
+            ["Todos", "HIGH", "MEDIUM", "LOW"],
+            key=f"fn_{source_label}",
+        )
+    with f2:
+        todas_entidades = sorted({d.entidade for r in resultados for d in r.deteccoes})
+        filtro_entidade = st.multiselect(
+            "Tipo de entidade",
+            todas_entidades,
+            key=f"fe_{source_label}",
+        )
+
+    linhas = []
+    for r in resultados:
+        chunk = r.chunk
+        for d in r.deteccoes:
+            if filtro_nivel != "Todos" and d.nivel != filtro_nivel:
+                continue
+            if filtro_entidade and d.entidade not in filtro_entidade:
+                continue
+            linhas.append({
+                "Issue / Pagina": chunk.get("issue_key") or chunk.get("pagina", "—"),
+                "Campo": chunk.get("campo", "—"),
+                "Entidade": d.entidade,
+                "Valor": d.valor_display,
+                "Nivel": d.nivel,
+                "Confianca": f"{d.confianca:.0%}",
+                "Secret": "Sim" if d.is_secret else "",
+                "Frameworks": ", ".join(d.frameworks[:2]),
+            })
+
+    if linhas:
+        df = pd.DataFrame(linhas)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+
+        col_dl1, col_dl2, _ = st.columns([2, 2, 4])
+        with col_dl1:
+            st.download_button(
+                "Exportar CSV",
+                df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"),
+                file_name=f"scan_{source_label.lower().replace(' ', '_')}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+        with col_dl2:
+            buf = io.BytesIO()
+            with pd.ExcelWriter(buf, engine="openpyxl") as w:
+                df.to_excel(w, index=False, sheet_name="Deteccoes")
+            st.download_button(
+                "Exportar Excel",
+                buf.getvalue(),
+                file_name=f"scan_{source_label.lower().replace(' ', '_')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+    else:
+        st.markdown(f'<p style="color:{TMU};font-size:13px;">Nenhuma deteccao com os filtros aplicados.</p>', unsafe_allow_html=True)
+
+    # Relatorio executivo
+    sec_hdr("Relatorio Executivo")
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    fw_str = ""
+    if resultados:
+        from plugins.frameworks import frameworks_impactados
+        registros = [{"entidade": d.entidade} for r in resultados for d in r.deteccoes]
+        fw_count = frameworks_impactados(registros)
+        fw_str = ", ".join(list(fw_count.keys())[:6])
+
+    relatorio = "\n".join([
+        "DATA PROTECTION SCANNER — RELATORIO EXECUTIVO",
+        "=" * 52,
+        f"Geracao: {ts}",
+        f"Fonte:   {source_label}",
+        "",
+        "RESUMO",
+        f"  Total de deteccoes : {total}",
+        f"  Risco alto         : {pn.get('HIGH', 0)}",
+        f"  Risco medio        : {pn.get('MEDIUM', 0)}",
+        f"  Risco baixo        : {pn.get('LOW', 0)}",
+        f"  Secrets detectados : {secrets}",
+        f"  Compliance score   : {score}%",
+        "",
+        "FRAMEWORKS IMPACTADOS",
+        f"  {fw_str}",
+        "",
+        "DETECCOES (primeiras 50)",
+        "-" * 52,
+    ] + [
+        f"  {l['Issue / Pagina']:12} | {l['Entidade']:22} | {l['Nivel']:6} | {l['Valor']}"
+        for l in linhas[:50]
+    ])
+
+    st.markdown(f'<div class="report-card">', unsafe_allow_html=True)
+    col_r1, col_r2, col_r3 = st.columns(3)
+    col_r1.markdown(f'<span style="font-size:12px;color:{TM};">Total</span><br>'
+                    f'<span style="font-size:18px;font-weight:700;color:{TD};">{total}</span>', unsafe_allow_html=True)
+    col_r2.markdown(f'<span style="font-size:12px;color:{TM};">Risco Alto</span><br>'
+                    f'<span style="font-size:18px;font-weight:700;color:{RD};">{pn.get("HIGH", 0)}</span>', unsafe_allow_html=True)
+    col_r3.markdown(f'<span style="font-size:12px;color:{TM};">Secrets</span><br>'
+                    f'<span style="font-size:18px;font-weight:700;color:#A78BFA;">{secrets}</span>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.download_button(
+        "Baixar Relatorio (.txt)",
+        relatorio.encode("utf-8"),
+        file_name=f"relatorio_{source_label.lower().replace(' ', '_')}.txt",
+        mime="text/plain",
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SIDEBAR
+# ─────────────────────────────────────────────────────────────────────────────
+with st.sidebar:
+    # ── Logo ──────────────────────────────────────────────────────────────────
+    st.markdown(f"""
+    <div style="padding:20px 0 18px;">
+      <div style="background:linear-gradient(135deg,{BD} 0%,{BM} 60%,{BR} 100%);
+        border-radius:10px;padding:16px 18px;">
+        <div style="font-size:11px;font-weight:700;color:{BL};letter-spacing:1.2px;
+          text-transform:uppercase;margin-bottom:4px;">Data Protection</div>
+        <div style="font-size:17px;font-weight:700;color:#fff;letter-spacing:-.3px;
+          line-height:1.1;">PII + Secrets<br>Scanner</div>
+        <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.15);
+          font-size:10px;color:{BL};letter-spacing:.3px;">v3.0 &nbsp;·&nbsp; Presidio PT &nbsp;·&nbsp; LGPD</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Navegacao ─────────────────────────────────────────────────────────────
+    st.markdown(f'<div class="sb-title">Navegacao</div>', unsafe_allow_html=True)
     pagina = st.radio(
-        label="Selecione a página",
-        options=[
-            "Visão Geral",
-            "Análise de Vendas",
-            "Desempenho Regional",
-            "Explorador de Dados",
-        ],
+        "pagina",
+        ["Painel Executivo", "Varredura Jira", "Varredura Confluence", "Texto Livre", "Anonymizar", "Frameworks"],
         label_visibility="collapsed",
     )
 
-    # Filtros Globais
-    st.markdown(f'<div class="sb-title">Filtros Globais</div>', unsafe_allow_html=True)
+    # ── Historico ─────────────────────────────────────────────────────────────
+    if st.session_state.scan_history:
+        st.markdown(f"""
+        <div style="margin-top:6px;padding-top:2px;border-top:1px solid {BOR};">
+          <div class="sb-title">Historico Recente</div>
+        </div>
+        """, unsafe_allow_html=True)
+        for h in st.session_state.scan_history[:5]:
+            _cor = RD if h["alto"] > 0 or h["secrets"] > 0 else GD
+            _badge_alto = f'<span style="color:{RD};font-weight:700;">{h["alto"]}H</span>&nbsp;' if h["alto"] > 0 else ""
+            _badge_sec  = f'<span style="color:#A78BFA;font-weight:700;">{h["secrets"]}S</span>' if h["secrets"] > 0 else ""
+            st.markdown(f"""
+            <div class="hist-item">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
+                <span style="font-weight:700;color:{TD};font-size:11.5px;">{h['tipo']}</span>
+                <span style="color:{TMU};font-size:10px;">{h['hora']}</span>
+              </div>
+              <div style="color:{TMU};font-size:10.5px;margin-bottom:4px;
+                white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{h['key']}</div>
+              <div style="font-size:11px;">
+                <span style="color:{_cor};font-weight:600;">{h['total']}</span>
+                <span style="color:{TMU};"> detec.</span>
+                &nbsp;{_badge_alto}{_badge_sec}
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
 
-    anos_disp = sorted(df_base["Ano"].unique().tolist())
-    nomes_mes = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"]
-
-    col_a, col_b = st.columns(2)
-    with col_a:
-        ano_ini = st.selectbox("Ano início", anos_disp, index=0,               key="a_ini")
-        mes_ini = st.selectbox("Mês início", range(1, 13),
-                               format_func=lambda m: nomes_mes[m - 1],          key="m_ini")
-    with col_b:
-        ano_fim = st.selectbox("Ano fim",   anos_disp, index=len(anos_disp)-1, key="a_fim")
-        mes_fim = st.selectbox("Mês fim",   range(1, 13),
-                               format_func=lambda m: nomes_mes[m - 1],
-                               index=11,                                         key="m_fim")
-
-    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
-
-    ubs_disp = sorted(df_base["Unidade_Negocio"].unique().tolist())
-    ubs_sel = st.multiselect(
-        "Unidade de Negócio",
-        options=ubs_disp,
-        default=ubs_disp,
-        key="ubs",
-    )
-
-    regs_disp = sorted(df_base["Regiao"].unique().tolist())
-    regs_sel = st.multiselect(
-        "Região",
-        options=regs_disp,
-        default=regs_disp,
-        key="regs",
-    )
-
-    # Rodape da sidebar
+    # ── Rodape ────────────────────────────────────────────────────────────────
     st.markdown(f"""
-    <div style="margin-top:24px;padding-top:14px;border-top:1px solid {BORDER_CLR};
-      font-size:11px;color:{TEXT_MID};line-height:1.7;">
-      <span style="font-weight:600;color:{TEXT_DARK};">Última atualização</span><br>
-      {DATA_ATUALIZACAO}<br>
-      <span style="color:{BLUE_ROYAL};font-weight:600;">v2.4.1</span>
-      &nbsp;&middot;&nbsp; Corporate Analytics
+    <div style="margin-top:32px;padding-top:12px;border-top:1px solid {BOR};">
+      <div style="font-size:10px;color:{TMU};line-height:1.8;">
+        <span style="color:{BR};font-weight:700;">OWASP LLM Top 10</span>
+        &nbsp;·&nbsp; LLM06 &nbsp;·&nbsp; LLM01<br>
+        Protecao pre-ingestao por LLM agents
+      </div>
     </div>
     """, unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 8. APLICACAO DOS FILTROS GLOBAIS
+# CABECALHO
 # ─────────────────────────────────────────────────────────────────────────────
-
-data_ini_ts = pd.Timestamp(ano_ini, mes_ini, 1)
-data_fim_ts = pd.Timestamp(ano_fim, mes_fim, 1)
-
-_ubs  = ubs_sel  if ubs_sel  else ubs_disp
-_regs = regs_sel if regs_sel else regs_disp
-
-df = df_base[
-    (df_base["Data"] >= data_ini_ts) &
-    (df_base["Data"] <= data_fim_ts) &
-    (df_base["Unidade_Negocio"].isin(_ubs)) &
-    (df_base["Regiao"].isin(_regs))
-].copy()
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 9. CABECALHO PRINCIPAL
-# ─────────────────────────────────────────────────────────────────────────────
-
-col_hdr, col_badge = st.columns([6, 1])
-with col_hdr:
-    st.markdown(f"""
-    <div style="margin-bottom:1.25rem;">
-      <h1 style="font-size:22px;font-weight:700;color:{TEXT_DARK};
-        margin:0 0 4px;letter-spacing:-.5px;">{pagina}</h1>
-      <p style="font-size:13px;color:{TEXT_MID};margin:0;">
-        Corporate Analytics Platform
-        &nbsp;&middot;&nbsp; Dados atualizados em {DATA_ATUALIZACAO}
-      </p>
-    </div>
-    """, unsafe_allow_html=True)
-with col_badge:
-    st.markdown(f"""
-    <div style="background:{BG_WHITE};border:1px solid {BORDER_CLR};
-      border-radius:6px;padding:8px 14px;text-align:right;
-      font-size:11px;color:{TEXT_MID};line-height:1.55;margin-top:4px;">
-      <strong style="color:{TEXT_DARK};font-size:13px;">
-        {len(df):,}
-      </strong><br>registros filtrados
-    </div>
-    """, unsafe_allow_html=True)
-
-st.markdown(f'<hr style="margin:0 0 1.5rem;">', unsafe_allow_html=True)
-
-# Guard: sem dados
-if df.empty:
-    st.markdown(f"""
-    <div class="empty-state">
-      <strong>Nenhum dado encontrado</strong>
-      <span>Ajuste o intervalo de datas ou os filtros de Unidade e Região na barra lateral.</span>
-    </div>
-    """, unsafe_allow_html=True)
-    st.stop()
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 10. FUNCAO DE EXPORTACAO CSV (reutilizada em todas as paginas)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def botao_exportar(dataframe: pd.DataFrame, nome_arquivo: str = "export_corporativo.csv") -> None:
-    csv_bytes = dataframe.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
-    st.download_button(
-        label="Exportar dados filtrados (CSV)",
-        data=csv_bytes,
-        file_name=nome_arquivo,
-        mime="text/csv",
-        use_container_width=True,
-    )
+st.markdown(f"""
+<div style="margin-bottom:1.25rem;">
+  <h1 style="font-size:22px;font-weight:700;color:{TD};margin:0 0 4px;letter-spacing:-.5px;">{pagina}</h1>
+  <p style="font-size:13px;color:{TM};margin:0;">Data Protection Platform &middot; PII · Secrets · LGPD · OWASP LLM Top 10</p>
+</div>
+<hr>
+""", unsafe_allow_html=True)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# PAGINA 1 — VISAO GERAL
+# PAGINA: PAINEL EXECUTIVO
 # ═════════════════════════════════════════════════════════════════════════════
-if pagina == "Visão Geral":
+if pagina == "Painel Executivo":
+    from plugins.scan_state import ScanStateStore as _ExecStore
+    from plugins.demo_data import EXEC_DEMO_HISTORICO
+    from plugins.frameworks import PII_FRAMEWORK_MAP, AI_FRAMEWORKS
 
-    # Computacao dos KPIs
-    receita_total  = df["Receita"].sum()
-    meta_total     = df["Meta"].sum()
-    atingimento    = (receita_total / meta_total * 100) if meta_total > 0 else 0.0
-    margem_media   = df["Margem_Pct"].mean()
-    clientes_total = df["Clientes_Ativos"].sum()
+    _estore = _ExecStore()
+    _historico_db = _estore.listar_historico()
+    _is_exec_demo = not _historico_db
 
-    df_ant = df_base[
-        (df_base["Data"] >= pd.Timestamp(ano_ini - 1, mes_ini, 1)) &
-        (df_base["Data"] <= pd.Timestamp(max(ano_fim - 1, ano_ini - 1), mes_fim, 1)) &
-        (df_base["Unidade_Negocio"].isin(_ubs)) &
-        (df_base["Regiao"].isin(_regs))
-    ]
-    receita_ant = df_ant["Receita"].sum()
-    var_receita  = ((receita_total / receita_ant) - 1) * 100 if receita_ant > 0 else 0.0
-    margem_ant   = df_ant["Margem_Pct"].mean() if not df_ant.empty else margem_media
-    var_margem   = margem_media - margem_ant
+    # Sem dados reais → agrega demo só em memória, nunca grava no banco
+    if _is_exec_demo:
+        from collections import Counter as _Counter
+        _demo_por_mes: list[dict] = []
+        _demo_por_fonte: dict[str, dict] = {}
+        _demo_ent_counter: _Counter[str] = _Counter()
 
-    # Linha de KPIs — 4 cards refinados
-    k1, k2, k3, k4 = st.columns(4)
+        _mes_agg: dict[str, dict] = {}
+        for _h in EXEC_DEMO_HISTORICO:
+            _m = _h["mes_ano"]
+            if _m not in _mes_agg:
+                _mes_agg[_m] = {"mes_ano": _m, "total": 0, "alto": 0, "medio": 0,
+                                 "baixo": 0, "secrets": 0, "compliance_score": [], "varreduras": 0}
+            _mes_agg[_m]["total"] += _h["total_deteccoes"]
+            _mes_agg[_m]["alto"] += _h["alto"]
+            _mes_agg[_m]["medio"] += _h["medio"]
+            _mes_agg[_m]["baixo"] += _h["baixo"]
+            _mes_agg[_m]["secrets"] += _h["secrets"]
+            _mes_agg[_m]["compliance_score"].append(_h["compliance_score"])
+            _mes_agg[_m]["varreduras"] += 1
 
-    seta_r = "+" if var_receita >= 0 else ""
-    cor_r  = "#16A34A" if var_receita >= 0 else "#DC2626"
-    kpi_card(k1, "Faturamento Total",
-             fmt_moeda(receita_total),
-             f"{seta_r}{fmt_pct(var_receita)} vs. ano anterior", cor_r)
+            _f = _h["fonte"]
+            if _f not in _demo_por_fonte:
+                _demo_por_fonte[_f] = {"fonte": _f, "total": 0, "varreduras": 0}
+            _demo_por_fonte[_f]["total"] += _h["total_deteccoes"]
+            _demo_por_fonte[_f]["varreduras"] += 1
 
-    cor_a  = "#16A34A" if atingimento >= 90 else "#DC2626"
-    kpi_card(k2, "Atingimento de Meta",
-             fmt_pct(atingimento),
-             f"Meta: {fmt_moeda(meta_total)}", cor_a)
+            for _e in _h["entidades"]:
+                _demo_ent_counter[_e] += 1
 
-    seta_m = "+" if var_margem >= 0 else ""
-    cor_m  = "#16A34A" if var_margem >= 0 else "#DC2626"
-    kpi_card(k3, "Margem Bruta Média",
-             fmt_pct(margem_media),
-             f"{seta_m}{fmt_pct(var_margem, 1)} pp vs. ano anterior", cor_m)
+        for _mv in _mes_agg.values():
+            _scores = _mv.pop("compliance_score")
+            _mv["compliance_score"] = round(sum(_scores) / len(_scores), 1)
+            _demo_por_mes.append(_mv)
 
-    kpi_card(k4, "Clientes Ativos (total)",
-             f"{clientes_total:,}".replace(",", "."),
-             "Soma do período filtrado", TEXT_MID)
+        _por_mes = sorted(_demo_por_mes, key=lambda x: x["mes_ano"])
+        _por_fonte = list(_demo_por_fonte.values())
+        _top_ents = [{"entidade": k, "count": v}
+                     for k, v in _demo_ent_counter.most_common(12)]
+        _historico_db = [{
+            "timestamp": f"{h['mes_ano']}-15T08:00:00",
+            "fonte": h["fonte"], "projetos": h["projetos"],
+            "total_deteccoes": h["total_deteccoes"], "alto": h["alto"],
+            "secrets": h["secrets"], "compliance_score": h["compliance_score"],
+        } for h in EXEC_DEMO_HISTORICO]
+    else:
+        _por_mes = _estore.agregar_por_mes()
+        _por_fonte = _estore.agregar_por_fonte()
+        _top_ents = _estore.top_entidades(12)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # Grafico 1: Tendencia de Faturamento (Area)
-    secao_titulo(
-        "Tendência de Faturamento",
-        "Evolução mensal por Unidade de Negócio — valores em R$ mil"
-    )
-
-    df_trend = (
-        df.groupby(["Data", "Unidade_Negocio"], as_index=False)
-          .agg(Receita=("Receita", "sum"), Meta=("Meta", "sum"))
-          .sort_values("Data")
-    )
-    df_trend["Receita_K"] = df_trend["Receita"] / 1_000
-    df_trend["Meta_K"]    = df_trend["Meta"]    / 1_000
-
-    fig_area = px.area(
-        df_trend,
-        x="Data", y="Receita_K",
-        color="Unidade_Negocio",
-        color_discrete_sequence=CHART_COLORS,
-        labels={
-            "Data":            "Período",
-            "Receita_K":       "Faturamento (R$ mil)",
-            "Unidade_Negocio": "Unidade de Negócio",
-        },
-        template="none",
-    )
-    df_meta_total = df.groupby("Data", as_index=False)["Meta"].sum()
-    df_meta_total["Meta_K"] = df_meta_total["Meta"] / 1_000
-    fig_area.add_trace(go.Scatter(
-        x=df_meta_total["Data"],
-        y=df_meta_total["Meta_K"],
-        mode="lines",
-        name="Meta Consolidada",
-        line=dict(color=BLUE_DARK, width=1.5, dash="dash"),
-        showlegend=True,
-    ))
-    fig_area = aplicar_layout_plotly(fig_area, height=340)
-    fig_area.update_traces(
-        selector=dict(type="scatter", fill="tozeroy"),
-        line=dict(width=2),
-        opacity=0.85,
-    )
-    fig_area.update_xaxes(
-        tickformat="%b\n%Y",
-        dtick="M1",
-        tickangle=0,
-        showgrid=False,
-    )
-    container_grafico(lambda: st.plotly_chart(fig_area, use_container_width=True))
-
-    # Graficos 2+3 lado a lado
-    col_g1, col_g2 = st.columns(2, gap="large")
-
-    # Grafico 2: Barras agrupadas Receita vs Meta por Regiao
-    with col_g1:
-        secao_titulo(
-            "Receita vs. Meta por Região",
-            "Comparativo de desempenho — R$ mil"
+    # ── KPI helper ────────────────────────────────────────────────────────────
+    def _kpi_card(titulo: str, valor: str, delta: str, delta_ok: bool, subtitulo: str = "") -> str:
+        _dcor = GD if delta_ok else RD
+        _darrow = "▼" if delta_ok else "▲"
+        _delta_html = (
+            f'<div style="font-size:12px;color:{_dcor};font-weight:600;margin-top:6px;">{_darrow} {delta}</div>'
+            if delta else
+            f'<div style="font-size:12px;margin-top:6px;">&nbsp;</div>'
         )
-        df_reg = (
-            df.groupby("Regiao", as_index=False)
-              .agg(Receita=("Receita", "sum"), Meta=("Meta", "sum"))
-              .sort_values("Receita", ascending=False)
+        _sub_html = (
+            f'<div style="font-size:11px;color:{TMU};margin-top:3px;">{subtitulo}</div>'
+            if subtitulo else
+            f'<div style="font-size:11px;margin-top:3px;">&nbsp;</div>'
         )
-        fig_bar = go.Figure()
-        fig_bar.add_trace(go.Bar(
-            name="Faturamento",
-            x=df_reg["Regiao"],
-            y=(df_reg["Receita"] / 1_000).round(0),
-            marker_color=BLUE_ROYAL,
-            marker_line_width=0,
-        ))
-        fig_bar.add_trace(go.Bar(
-            name="Meta",
-            x=df_reg["Regiao"],
-            y=(df_reg["Meta"] / 1_000).round(0),
-            marker_color=BLUE_LIGHT,
-            marker_line_width=0,
-        ))
-        fig_bar.update_layout(barmode="group")
-        fig_bar = aplicar_layout_plotly(fig_bar, height=320)
-        fig_bar.update_yaxes(title_text="R$ mil", tickformat=",.0f")
-        container_grafico(lambda: st.plotly_chart(fig_bar, use_container_width=True))
+        return f"""
+        <div style="background:{BPW};border:1px solid {BOR};border-radius:10px;
+          padding:18px 20px;height:130px;box-sizing:border-box;">
+          <div style="font-size:11px;font-weight:700;color:{TM};text-transform:uppercase;
+            letter-spacing:.6px;margin-bottom:8px;">{titulo}</div>
+          <div style="font-size:28px;font-weight:700;color:{TD};letter-spacing:-1px;
+            line-height:1;">{valor}</div>
+          {_delta_html}
+          {_sub_html}
+        </div>"""
 
-    # Grafico 3: Dispersao Margem x Faturamento
-    with col_g2:
-        secao_titulo(
-            "Margem x Faturamento por Segmento",
-            "Eficiência operacional — tamanho proporcional às negociações"
-        )
-        df_sc = (
-            df.groupby(["Unidade_Negocio", "Regiao"], as_index=False)
-              .agg(
-                  Receita=("Receita", "sum"),
-                  Margem=("Margem_Pct", "mean"),
-                  Negociacoes=("Negociacoes", "sum"),
-              )
-        )
-        fig_sc = px.scatter(
-            df_sc,
-            x=(df_sc["Receita"] / 1_000).round(0),
-            y=df_sc["Margem"].round(1),
-            color="Unidade_Negocio",
-            size="Negociacoes",
-            hover_data={"Regiao": True},
-            color_discrete_sequence=CHART_COLORS,
-            labels={
-                "x":               "Faturamento (R$ mil)",
-                "y":               "Margem Bruta (%)",
-                "Unidade_Negocio": "Unidade",
-            },
-            template="none",
-        )
-        fig_sc = aplicar_layout_plotly(fig_sc, height=320)
-        fig_sc.update_traces(marker_line_width=0)
-        fig_sc.update_yaxes(ticksuffix="%")
-        container_grafico(lambda: st.plotly_chart(fig_sc, use_container_width=True))
+    # ── Calculos KPI ──────────────────────────────────────────────────────────
+    _meses_ord = sorted(_por_mes, key=lambda x: x["mes_ano"])
+    _mes_atual = _meses_ord[-1] if _meses_ord else {}
+    _mes_ant = _meses_ord[-2] if len(_meses_ord) > 1 else {}
 
-    # Tabela Resumo
-    st.markdown("<br>", unsafe_allow_html=True)
-    secao_titulo(
-        "Resumo por Unidade de Negócio e Região",
-        "Consolidado do período filtrado, ordenado por faturamento"
-    )
+    _tot_acum = sum(m["total"] for m in _meses_ord)
+    _tot_atual = _mes_atual.get("total", 0)
+    _tot_ant = _mes_ant.get("total", 1) or 1
+    _delta_det = abs(_tot_atual - _tot_ant)
+    _reducao_pct = round(((_tot_ant - _tot_atual) / _tot_ant) * 100, 1) if _tot_ant else 0
+    _reducao_ok = _tot_atual < _tot_ant
 
-    df_tbl = (
-        df.groupby(["Unidade_Negocio", "Regiao"], as_index=False)
-          .agg(
-              Receita_Total=("Receita",         "sum"),
-              Meta_Total   =("Meta",            "sum"),
-              Margem_Media =("Margem_Pct",      "mean"),
-              Clientes     =("Clientes_Ativos", "sum"),
-              Negociacoes  =("Negociacoes",     "sum"),
-          )
-          .sort_values("Receita_Total", ascending=False)
-    )
-    df_tbl["Atingimento (%)"] = (df_tbl["Receita_Total"] / df_tbl["Meta_Total"] * 100).round(1)
-    df_tbl["Receita_Total"]   = df_tbl["Receita_Total"].map(lambda v: f"R$ {v:,.0f}")
-    df_tbl["Meta_Total"]      = df_tbl["Meta_Total"].map(lambda v: f"R$ {v:,.0f}")
-    df_tbl["Margem_Media"]    = df_tbl["Margem_Media"].map(lambda v: f"{v:.1f}%")
-    df_tbl["Atingimento (%)"] = df_tbl["Atingimento (%)"].map(lambda v: f"{v:.1f}%")
-    df_tbl = df_tbl.rename(columns={
-        "Unidade_Negocio": "Unidade de Negócio",
-        "Receita_Total":   "Faturamento Total",
-        "Meta_Total":      "Meta",
-        "Margem_Media":    "Margem Média",
-        "Negociacoes":     "Negociações Fechadas",
-    })
+    _score_atual = _mes_atual.get("compliance_score", 0.0)
+    _score_ant = _mes_ant.get("compliance_score", 0.0)
+    _score_delta = round(_score_atual - _score_ant, 1)
 
-    st.dataframe(df_tbl, use_container_width=True, hide_index=True)
-    botao_exportar(df, "visao_geral_filtrado.csv")
+    _total_varreduras = sum(m["varreduras"] for m in _meses_ord)
+    _alto_atual = _mes_atual.get("alto", 0)
+    _alto_ant = _mes_ant.get("alto", 0)
 
+    if _is_exec_demo:
+        st.markdown(f"""
+        <div style="background:{BPW};border:1px solid {BORM};border-radius:8px;
+          padding:10px 16px;margin-bottom:16px;font-size:12px;color:{TM};">
+          Exibindo dados de demonstracao (6 meses simulados). Os dados reais aparecao
+          aqui apos a primeira varredura.
+        </div>""", unsafe_allow_html=True)
 
-# ═════════════════════════════════════════════════════════════════════════════
-# PAGINA 2 — ANALISE DE VENDAS
-# ═════════════════════════════════════════════════════════════════════════════
-elif pagina == "Análise de Vendas":
+    # ── KPIs ──────────────────────────────────────────────────────────────────
+    _k1, _k2, _k3, _k4 = st.columns(4, gap="medium")
+    _k1.markdown(_kpi_card(
+        "Total de Varreduras", str(_total_varreduras),
+        "", True, f"{len(_meses_ord)} mes{'es' if len(_meses_ord) != 1 else ''} de historico"
+    ), unsafe_allow_html=True)
+    _k2.markdown(_kpi_card(
+        "Deteccoes Este Mes", str(_tot_atual),
+        f"{abs(_reducao_pct)}% vs mes anterior", _reducao_ok,
+        "queda = plataforma funcionando" if _reducao_ok else "alta = novos dados expostos"
+    ), unsafe_allow_html=True)
+    _k3.markdown(_kpi_card(
+        "Score de Conformidade", f"{_score_atual:.0f}%",
+        f"{abs(_score_delta)}pp vs mes anterior", _score_delta >= 0,
+        "meta: 90%"
+    ), unsafe_allow_html=True)
+    _k4.markdown(_kpi_card(
+        "Itens Alto Risco", str(_alto_atual),
+        f"{abs(_alto_atual - _alto_ant)} vs mes anterior", _alto_atual <= _alto_ant,
+        "HIGH + Secrets combinados"
+    ), unsafe_allow_html=True)
 
-    secao_titulo(
-        "Evolução de Faturamento vs. Meta",
-        "Série temporal consolidada — linha tracejada representa meta do período"
-    )
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
-    df_vs = (
-        df.groupby("Data", as_index=False)
-          .agg(Faturamento=("Receita", "sum"), Meta=("Meta", "sum"))
-          .sort_values("Data")
-    )
-    df_vs["Atingimento (%)"] = (df_vs["Faturamento"] / df_vs["Meta"] * 100).round(1)
+    # ── Linha 1: Tendencia mensal + Score ─────────────────────────────────────
+    _c_trend, _c_score = st.columns([3, 2], gap="medium")
 
-    fig_ln = go.Figure()
-    fig_ln.add_trace(go.Scatter(
-        x=df_vs["Data"], y=(df_vs["Faturamento"] / 1_000).round(1),
-        name="Faturamento",
-        mode="lines+markers",
-        line=dict(color=BLUE_ROYAL, width=2.5),
-        marker=dict(size=5, color=BLUE_ROYAL),
-        fill="tozeroy",
-        fillcolor=f"rgba(59,130,246,.08)",
-    ))
-    fig_ln.add_trace(go.Scatter(
-        x=df_vs["Data"], y=(df_vs["Meta"] / 1_000).round(1),
-        name="Meta",
-        mode="lines",
-        line=dict(color=BLUE_DARK, width=1.8, dash="dot"),
-    ))
-    fig_ln = aplicar_layout_plotly(fig_ln, height=360)
-    fig_ln.update_xaxes(tickformat="%b %Y", dtick="M1", tickangle=-30)
-    fig_ln.update_yaxes(title_text="R$ mil", tickformat=",.0f")
-    container_grafico(lambda: st.plotly_chart(fig_ln, use_container_width=True))
+    with _c_trend:
+        sec_hdr("Tendencia Mensal de Deteccoes")
+        if _por_mes:
+            _df_mes = pd.DataFrame(_por_mes)
+            _meses_labels = [m["mes_ano"] for m in _meses_ord]
 
-    st.markdown("<br>", unsafe_allow_html=True)
+            _fig_trend = go.Figure()
+            _fig_trend.add_trace(go.Bar(
+                name="Alto Risco", x=_meses_labels,
+                y=[m["alto"] + m["secrets"] for m in _meses_ord],
+                marker_color=RD, opacity=0.85,
+            ))
+            _fig_trend.add_trace(go.Bar(
+                name="Medio", x=_meses_labels,
+                y=[m["medio"] for m in _meses_ord],
+                marker_color=OD, opacity=0.85,
+            ))
+            _fig_trend.add_trace(go.Bar(
+                name="Baixo", x=_meses_labels,
+                y=[m["baixo"] for m in _meses_ord],
+                marker_color="#334155", opacity=0.85,
+            ))
+            _fig_trend.add_trace(go.Scatter(
+                name="Total", x=_meses_labels,
+                y=[m["total"] for m in _meses_ord],
+                mode="lines+markers",
+                line={"color": BL, "width": 2.5, "dash": "dot"},
+                marker={"size": 7},
+                yaxis="y",
+            ))
+            _fig_trend.update_layout(
+                barmode="stack", paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)", height=280,
+                margin={"l": 0, "r": 0, "t": 10, "b": 0},
+                legend={"orientation": "h", "y": -0.15, "font": {"size": 11, "color": TM}},
+                xaxis={"gridcolor": BOR, "tickfont": {"size": 11, "color": TM}},
+                yaxis={"gridcolor": BOR, "tickfont": {"size": 11, "color": TM}},
+                font={"color": TM},
+            )
+            st.plotly_chart(_fig_trend, use_container_width=True, config={"displayModeBar": False})
+        else:
+            st.markdown(f'<p style="color:{TMU};font-size:13px;">Sem dados ainda.</p>', unsafe_allow_html=True)
 
-    col_v1, col_v2 = st.columns(2, gap="large")
+    with _c_score:
+        sec_hdr("Evolucao do Score de Conformidade")
+        if _por_mes:
+            _fig_score = go.Figure()
+            _fig_score.add_trace(go.Scatter(
+                x=_meses_labels,
+                y=[m["compliance_score"] for m in _meses_ord],
+                mode="lines+markers",
+                fill="tozeroy",
+                fillcolor=f"rgba(34,197,94,.12)",
+                line={"color": GD, "width": 2.5},
+                marker={"size": 8, "color": GD},
+            ))
+            _fig_score.add_hline(y=90, line_dash="dash", line_color=GD,
+                                 annotation_text="Meta 90%",
+                                 annotation_font={"size": 10, "color": GD})
+            _fig_score.update_layout(
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                height=280, margin={"l": 0, "r": 10, "t": 10, "b": 0},
+                yaxis={"range": [0, 105], "gridcolor": BOR,
+                       "ticksuffix": "%", "tickfont": {"size": 11, "color": TM}},
+                xaxis={"gridcolor": BOR, "tickfont": {"size": 11, "color": TM}},
+                showlegend=False, font={"color": TM},
+            )
+            st.plotly_chart(_fig_score, use_container_width=True, config={"displayModeBar": False})
 
-    # Barras horizontais: Top segmentos por faturamento
-    with col_v1:
-        secao_titulo("Top Segmentos por Faturamento", "Unidade de Negócio x Região")
-        df_seg = (
-            df.assign(Segmento=df["Unidade_Negocio"] + " — " + df["Regiao"])
-              .groupby("Segmento", as_index=False)
-              .agg(Receita=("Receita", "sum"))
-              .sort_values("Receita")
-              .tail(10)
-        )
-        fig_hbar = px.bar(
-            df_seg,
-            x=(df_seg["Receita"] / 1_000).round(0),
-            y="Segmento",
+    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+
+    # ── Linha 2: Top entidades + Por fonte + Frameworks ───────────────────────
+    _c_ent, _c_fonte, _c_fw = st.columns([3, 2, 3], gap="medium")
+
+    with _c_ent:
+        sec_hdr("Top Entidades Detectadas")
+        if _top_ents:
+            _df_ents = pd.DataFrame(_top_ents).sort_values("count")
+            _cores_ent = []
+            _secret_types = {"JWT_TOKEN", "AWS_ACCESS_KEY", "GITHUB_TOKEN", "PRIVATE_KEY",
+                             "CONNECTION_STRING", "SECRET_IN_CONTEXT"}
+            for _e in _df_ents["entidade"]:
+                _cores_ent.append("#A78BFA" if _e in _secret_types else BR)
+            _fig_ents = go.Figure(go.Bar(
+                x=_df_ents["count"], y=_df_ents["entidade"],
+                orientation="h",
+                marker_color=_cores_ent,
+                text=_df_ents["count"], textposition="outside",
+                textfont={"size": 11, "color": TM},
+            ))
+            _fig_ents.update_layout(
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                height=320, margin={"l": 0, "r": 40, "t": 10, "b": 0},
+                xaxis={"gridcolor": BOR, "tickfont": {"size": 10, "color": TM}},
+                yaxis={"tickfont": {"size": 11, "color": TD}},
+                showlegend=False,
+            )
+            st.plotly_chart(_fig_ents, use_container_width=True, config={"displayModeBar": False})
+            st.markdown(
+                f'<p style="font-size:10.5px;color:{TMU};">'
+                f'<span style="color:#A78BFA;">■</span> Secrets / Credenciais &nbsp;&nbsp;'
+                f'<span style="color:{BR};">■</span> PII Pessoal</p>',
+                unsafe_allow_html=True,
+            )
+
+    with _c_fonte:
+        sec_hdr("Deteccoes por Fonte")
+        if _por_fonte:
+            _cores_fonte = {
+                "Jira": BR, "Confluence": "#7C3AED", "Texto": GD,
+            }
+            _fig_fonte = go.Figure(go.Pie(
+                labels=[f["fonte"] for f in _por_fonte],
+                values=[f["total"] for f in _por_fonte],
+                hole=0.55,
+                marker_colors=[_cores_fonte.get(f["fonte"], OD) for f in _por_fonte],
+                textinfo="percent+label",
+                textfont={"size": 11, "color": "#fff"},
+                hovertemplate="%{label}<br>%{value} deteccoes<extra></extra>",
+            ))
+            _fig_fonte.update_layout(
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                height=200, margin={"l": 0, "r": 0, "t": 0, "b": 0},
+                showlegend=False,
+            )
+            st.plotly_chart(_fig_fonte, use_container_width=True, config={"displayModeBar": False})
+
+            for _f in sorted(_por_fonte, key=lambda x: -x["total"]):
+                _pct_f = round(_f["total"] / max(sum(x["total"] for x in _por_fonte), 1) * 100)
+                st.markdown(
+                    f'<div style="display:flex;justify-content:space-between;'
+                    f'font-size:12px;color:{TM};margin-bottom:4px;">'
+                    f'<span style="color:{TD};">{_f["fonte"]}</span>'
+                    f'<span>{_f["total"]:,} &nbsp;<span style="color:{TMU};">({_pct_f}%)</span></span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+    with _c_fw:
+        sec_hdr("Cobertura de Frameworks Regulatorios")
+        # Inverte PII_FRAMEWORK_MAP: framework → soma de detecções das entidades mapeadas
+        _ent_counts: dict[str, int] = {t["entidade"]: t["count"] for t in _top_ents}
+        _fw_hits_map: dict[str, int] = {}
+        for _ent, _fws in PII_FRAMEWORK_MAP.items():
+            _cnt = _ent_counts.get(_ent, 0)
+            if _cnt == 0:
+                continue
+            for _fw in _fws:
+                _fw_key = _fw.split(" —")[0].strip()  # normaliza nome
+                _fw_hits_map[_fw_key] = _fw_hits_map.get(_fw_key, 0) + _cnt
+
+        _fw_scores = sorted(
+            [{"framework": k[:30], "hits": v} for k, v in _fw_hits_map.items()],
+            key=lambda x: -x["hits"],
+        )[:10]
+
+        _fw_lista_inv = list(reversed(_fw_scores))  # menor embaixo, maior em cima
+
+        # Cor por tipo de framework
+        def _fw_cor(name: str) -> str:
+            if "OWASP" in name or "MITRE" in name or "NIST" in name:
+                return "#A78BFA"
+            if "PCI" in name:
+                return RD
+            if "LGPD" in name or "GDPR" in name or "ISO" in name:
+                return BR
+            return OD
+
+        _fig_fw = go.Figure(go.Bar(
+            x=[f["hits"] for f in _fw_lista_inv],
+            y=[f["framework"] for f in _fw_lista_inv],
             orientation="h",
-            color=(df_seg["Receita"] / 1_000).round(0),
-            color_continuous_scale=[[0, BLUE_LIGHT], [1, BLUE_DARK]],
-            labels={"x": "Faturamento (R$ mil)", "Segmento": ""},
-            template="none",
-        )
-        fig_hbar.update_coloraxes(showscale=False)
-        fig_hbar = aplicar_layout_plotly(fig_hbar, height=340)
-        fig_hbar.update_xaxes(title_text="R$ mil")
-        fig_hbar.update_traces(marker_line_width=0)
-        container_grafico(lambda: st.plotly_chart(fig_hbar, use_container_width=True))
-
-    # Atingimento de meta mensal
-    with col_v2:
-        secao_titulo("Atingimento de Meta Mensal (%)", "100% = meta exatamente atingida")
-        df_at = (
-            df.groupby("Data", as_index=False)
-              .agg(R=("Receita", "sum"), M=("Meta", "sum"))
-              .assign(Atingimento=lambda x: (x["R"] / x["M"] * 100).round(1))
-              .sort_values("Data")
-        )
-        cores_at = [BLUE_ROYAL if v >= 90 else "#EF4444" for v in df_at["Atingimento"]]
-        fig_at = go.Figure(go.Bar(
-            x=df_at["Data"],
-            y=df_at["Atingimento"],
-            marker_color=cores_at,
-            marker_line_width=0,
-            name="Atingimento (%)",
+            marker_color=[_fw_cor(f["framework"]) for f in _fw_lista_inv],
+            text=[f["hits"] for f in _fw_lista_inv],
+            textposition="outside",
+            textfont={"size": 11, "color": TM},
         ))
-        fig_at.add_hline(y=100, line_dash="dash", line_color=BLUE_DARK,
-                          line_width=1.5, annotation_text="Meta 100%",
-                          annotation_font=dict(size=11, color=BLUE_DARK))
-        fig_at = aplicar_layout_plotly(fig_at, height=340)
-        fig_at.update_xaxes(tickformat="%b\n%Y", dtick="M1", tickangle=0)
-        fig_at.update_yaxes(ticksuffix="%", title_text="Atingimento (%)")
-        container_grafico(lambda: st.plotly_chart(fig_at, use_container_width=True))
+        _fig_fw.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            height=320, margin={"l": 0, "r": 50, "t": 10, "b": 0},
+            xaxis={"gridcolor": BOR, "tickfont": {"size": 10, "color": TM},
+                   "title": {"text": "deteccoes mapeadas", "font": {"size": 10, "color": TM}}},
+            yaxis={"tickfont": {"size": 10, "color": TD}},
+            showlegend=False,
+        )
+        if _fw_scores:
+            st.plotly_chart(_fig_fw, use_container_width=True, config={"displayModeBar": False})
+            st.markdown(
+                f'<p style="font-size:10.5px;color:{TMU};">'
+                f'<span style="color:#A78BFA;">■</span> AI/Security &nbsp;'
+                f'<span style="color:{BR};">■</span> Privacidade &nbsp;'
+                f'<span style="color:{RD};">■</span> PCI</p>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(f'<p style="color:{TMU};font-size:13px;">Execute varreduras para popular este grafico.</p>', unsafe_allow_html=True)
 
-    botao_exportar(df, "analise_vendas_filtrado.csv")
+    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+
+    # ── Tabela de execucoes recentes ──────────────────────────────────────────
+    sec_hdr("Execucoes Recentes")
+    _hist_rec = _historico_db[:20]
+    if _hist_rec:
+        _df_rec = pd.DataFrame([{
+            "Data/Hora": h["timestamp"][:16].replace("T", " "),
+            "Fonte": h["fonte"],
+            "Projetos/Spaces": h["projetos"],
+            "Total": h["total_deteccoes"],
+            "Alto": h["alto"],
+            "Secrets": h["secrets"],
+            "Score": f"{h['compliance_score']:.0f}%",
+        } for h in _hist_rec])
+        st.dataframe(_df_rec, use_container_width=True, hide_index=True)
+
+        _col_exp, _ = st.columns([2, 5])
+        with _col_exp:
+            _csv_exec = _df_rec.to_csv(index=False).encode()
+            st.download_button("Exportar historico CSV", _csv_exec,
+                               "historico_deteccoes.csv", "text/csv",
+                               use_container_width=True)
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PAGINA: VARREDURA JIRA
+# ═════════════════════════════════════════════════════════════════════════════
+elif pagina == "Varredura Jira":
+    from plugins import JiraPlugin, ScanStateStore
+    from plugins.scanner import scan_chunks, resumir
+    from plugins.demo_data import JIRA_DEMO_TRECHOS, JIRA_DEMO_PROJETOS
+
+    tab_conn, tab_scan, tab_res, tab_acoes, tab_agend = st.tabs(
+        ["Conexao", "Scan", "Resultados", "Acoes", "Agendamentos"]
+    )
+
+    # ── Conexao ───────────────────────────────────────────────────────────────
+    with tab_conn:
+        _jp_state = st.session_state.jira_plugin
+        if _jp_state is not None:
+            if _jp_state == "demo":
+                st.info("Modo Demo ativo. Usando dados simulados.")
+            else:
+                st.success("Conectado ao Jira.")
+            if st.button("Desconectar", key="jira_desconect"):
+                st.session_state.jira_plugin = None
+                st.session_state.jira_projetos = []
+                st.rerun()
+        else:
+            st.markdown(f'<p style="font-size:13px;color:{TM};">Conecte ao Jira Cloud ou Server para varredura real. Sem credenciais, explore com o modo Demo.</p>', unsafe_allow_html=True)
+            with st.form("jira_conn"):
+                url = st.text_input("URL do Jira", placeholder="https://empresa.atlassian.net")
+                usuario = st.text_input("Email / Usuario")
+                token = st.text_input("Token de API", type="password",
+                                      help="Gere em: Atlassian Account > Security > API tokens")
+                cloud = st.checkbox("Jira Cloud", value=True)
+                c1, c2 = st.columns(2)
+                conectar = c1.form_submit_button("Conectar", use_container_width=True)
+                demo = c2.form_submit_button("Usar Demo (sem credenciais)", use_container_width=True)
+
+            if conectar and url and usuario and token:
+                _p = JiraPlugin()
+                _res = _p.conectar(url, usuario, token, cloud)
+                if _res["ok"]:
+                    st.session_state.jira_plugin = _p
+                    st.success(_res["mensagem"])
+                    st.rerun()
+                else:
+                    st.error(_res["mensagem"])
+
+            if demo:
+                st.session_state.jira_plugin = "demo"
+                st.session_state.jira_projetos = JIRA_DEMO_PROJETOS
+                st.rerun()
+
+    # ── Scan ──────────────────────────────────────────────────────────────────
+    with tab_scan:
+        _store = ScanStateStore()
+        _is_demo = st.session_state.jira_plugin == "demo"
+        _is_real = st.session_state.jira_plugin not in (None, "demo")
+
+        if st.session_state.jira_plugin is None:
+            st.warning("Conecte ao Jira na aba Conexao para executar a varredura.")
+            st.stop()
+
+        if _is_demo:
+            st.info("Modo Demo — usando dados fictícios com PII e secrets simulados.")
+
+        # ── Listagem de projetos ───────────────────────────────────────────
+        sec_hdr("Projetos Disponiveis")
+
+        _projetos = st.session_state.jira_projetos
+        _col_load, _col_info = st.columns([2, 5])
+        with _col_load:
+            _lbl_btn = "Atualizar lista" if _projetos else "Carregar Projetos"
+            if st.button(_lbl_btn, use_container_width=True):
+                if _is_demo:
+                    st.session_state.jira_projetos = JIRA_DEMO_PROJETOS
+                else:
+                    with st.spinner("Buscando projetos e contando issues (paralelo)..."):
+                        st.session_state.jira_projetos = (
+                            st.session_state.jira_plugin.listar_projetos()
+                        )
+                st.rerun()
+        with _col_info:
+            if _projetos:
+                _total_cards = sum(p.get("count", 0) for p in _projetos if p.get("count", 0) > 0)
+                st.markdown(
+                    f'<p style="font-size:12px;color:{TM};padding-top:8px;">'
+                    f'{len(_projetos)} projetos — {_total_cards:,} cards no total</p>',
+                    unsafe_allow_html=True,
+                )
+
+        if _projetos:
+            _render_projetos_tabela(_projetos)
+
+            st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+            sec_hdr("Selecionar Projetos para Varrer")
+
+            _selecao_modo = st.radio(
+                "Escopo",
+                ["Todos os projetos acessiveis", "Selecionar projetos especificos"],
+                horizontal=True,
+                key="jira_selecao_modo",
+            )
+
+            if _selecao_modo == "Selecionar projetos especificos":
+                _todas_chaves = [p["key"] for p in _projetos]
+                _selecionados = st.multiselect(
+                    "Projetos",
+                    options=_todas_chaves,
+                    default=st.session_state.jira_proj_selecionados or _todas_chaves[:1],
+                    format_func=lambda k: f"{k} — {next((p['name'] for p in _projetos if p['key'] == k), k)}",
+                    key="jira_multiselect",
+                )
+                st.session_state.jira_proj_selecionados = _selecionados
+                _total_sel = sum(
+                    p.get("count", 0)
+                    for p in _projetos
+                    if p["key"] in _selecionados and p.get("count", 0) > 0
+                )
+                if _selecionados:
+                    st.markdown(
+                        f'<p style="font-size:11px;color:{TM};">Estimativa: ~{_total_sel:,} cards nos projetos selecionados</p>',
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.session_state.jira_proj_selecionados = []
+                _total_cards_todos = sum(p.get("count", 0) for p in _projetos if p.get("count", 0) > 0)
+                if _total_cards_todos > 5000:
+                    st.warning(
+                        f"Todos os projetos somam ~{_total_cards_todos:,} cards. "
+                        "Use o scan incremental ou limite de issues para evitar longas esperas."
+                    )
+
+        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+        sec_hdr("Opcoes de Varredura")
+        _col1, _col2 = st.columns(2)
+        with _col1:
+            _proj_ref = (
+                (st.session_state.jira_proj_selecionados or ["todos"])
+                if _projetos else ["todos"]
+            )
+            _proj_ref_key = "_".join(_proj_ref[:3])
+            _ultimo = _store.last_scan_date_str("jira", _proj_ref_key) if _proj_ref_key != "todos" else None
+            _incremental = st.checkbox(
+                f"Scan incremental{f' (desde {_ultimo})' if _ultimo else ' (primeiro scan = completo)'}",
+                value=bool(_ultimo),
+                key="jira_incr",
+            )
+            _max_issues = st.number_input(
+                "Limite de issues por projeto (0 = sem limite)",
+                value=500, step=100, min_value=0, key="jira_max",
+            )
+        with _col2:
+            _incluir_anexos = st.checkbox("Incluir anexos (PDF, imagens, DOCX)", value=False, key="jira_anexos")
+            if _is_demo and not _projetos:
+                st.info("Clique em 'Carregar Projetos' para ver os projetos disponíveis.")
+
+        if st.button("Executar Varredura Jira", use_container_width=True, key="btn_jira_scan"):
+            _analyzer = get_analyzer()
+            _chunks: list = []
+            _proj_para_escanear = st.session_state.jira_proj_selecionados or [""]
+
+            with st.status("Executando varredura Jira...", expanded=True) as _status:
+                if _is_demo:
+                    st.write(f"Modo demo: {len(JIRA_DEMO_TRECHOS)} chunks carregados.")
+                    _chunks = list(JIRA_DEMO_TRECHOS)
+                else:
+                    _plugin_jira: JiraPlugin = st.session_state.jira_plugin
+                    _desde = _store.last_scan_date_str("jira", _proj_ref_key) if _incremental and _proj_ref_key != "todos" else ""
+                    _total_issues_count = 0
+
+                    for _pkey in _proj_para_escanear:
+                        _label_proj = _pkey or "todos os projetos"
+                        st.write(f"Buscando issues — projeto: {_label_proj}...")
+                        _issues = _plugin_jira.buscar_issues(
+                            _pkey,
+                            desde=_desde,
+                            max_total=int(_max_issues),
+                        )
+                        st.write(f"  {len(_issues)} issues. Extraindo texto...")
+                        _total_issues_count += len(_issues)
+                        for _issue in _issues:
+                            _chunks.extend(_plugin_jira.extrair_textos(_issue))
+
+                        if _incluir_anexos and _issues:
+                            from plugins.attachment_scanner import escanear_anexos
+                            _pares: list = []
+                            for _issue in _issues:
+                                for _att in _plugin_jira.listar_anexos(_issue.key):
+                                    try:
+                                        _pares.append((_att, _plugin_jira.baixar_anexo(_att.url_download)))
+                                    except Exception:
+                                        pass
+                            if _pares:
+                                st.write(f"  Escaneando {len(_pares)} anexos...")
+                                _res_anx = escanear_anexos(_pares, _analyzer)
+                                for _ra in _res_anx:
+                                    if _ra.resultado:
+                                        _chunks.append(_ra.resultado.chunk)
+
+                    if _proj_ref_key != "todos":
+                        _store.set_last_scan("jira", _proj_ref_key, total_items=_total_issues_count)
+
+                st.write(f"Processando {len(_chunks)} chunks em paralelo...")
+                _resultados = scan_chunks(_chunks, _analyzer)
+                _metricas = resumir(_resultados)
+                st.session_state.jira_resultados = _resultados
+                st.session_state.jira_metricas = _metricas
+                _add_history("Jira", "+".join(_proj_para_escanear[:3]) or "demo", _metricas)
+                _status.update(
+                    label=f"Varredura concluida — {_metricas['total_deteccoes']} deteccoes.",
+                    state="complete",
+                )
+
+    # ── Resultados ────────────────────────────────────────────────────────────
+    with tab_res:
+        render_resultados(
+            st.session_state.jira_resultados,
+            st.session_state.jira_metricas,
+            "Jira",
+        )
+
+    # ── Acoes ─────────────────────────────────────────────────────────────────
+    with tab_acoes:
+        _jp = st.session_state.jira_plugin
+        _is_demo_ac = _jp == "demo"
+        _is_real_ac = _jp not in (None, "demo")
+        _res_jira = st.session_state.jira_resultados
+
+        if _jp is None:
+            st.markdown(f"""
+            <div style="background:{BPW};border:1px solid {BOR};border-radius:8px;
+              padding:36px;text-align:center;color:{TM};margin:2rem 0;">
+              <div style="font-size:14px;font-weight:600;color:{TD};margin-bottom:6px;">
+                Sem conexao ativa
+              </div>
+              Conecte ao Jira na aba Conexao para habilitar acoes.
+            </div>
+            """, unsafe_allow_html=True)
+            st.stop()
+
+        if _is_demo_ac:
+            st.markdown(f"""
+            <div style="background:{BPW};border:1.5px solid {BORM};border-radius:8px;
+              padding:14px 18px;margin-bottom:18px;">
+              <div style="font-size:13px;font-weight:700;color:{TD};margin-bottom:3px;">
+                Modo Demo — acoes de escrita desabilitadas
+              </div>
+              <div style="font-size:12px;color:{TM};">
+                Conecte ao Jira real na aba <b>Conexao</b> para habilitar as acoes de remediacao.
+                As opcoes abaixo mostram exatamente o fluxo que estara disponivel.
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # ── Seletor visual de modo ─────────────────────────────────────────
+        sec_hdr("O Que Voce Quer Fazer com os Cards?")
+        st.markdown(
+            f'<p style="font-size:12px;color:{TM};margin-bottom:12px;">'
+            'Escolha uma acao. Cada uma tem um impacto diferente no Jira — leia antes de aplicar.</p>',
+            unsafe_allow_html=True,
+        )
+
+        _cols_modo = st.columns(5, gap="small")
+        for _col, _modo in zip(_cols_modo, ["readonly", "properties", "label", "comment", "scrub"]):
+            with _col:
+                _render_modo_card(
+                    _modo,
+                    selecionado=(st.session_state.acoes_modo == _modo),
+                    disabled=_is_demo_ac,
+                )
+
+        _modo_atual = st.session_state.acoes_modo
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+        # ── Sem resultados ainda ──────────────────────────────────────────
+        if not _res_jira:
+            st.markdown(
+                f'<p style="font-size:13px;color:{TMU};margin-top:4px;">'
+                'Execute a varredura (aba Scan) para ver os cards com deteccoes aqui.</p>',
+                unsafe_allow_html=True,
+            )
+        else:
+            _issues_detectadas = sorted({
+                r.chunk.get("issue_key", "")
+                for r in _res_jira if r.total_deteccoes > 0 and r.chunk.get("issue_key")
+            })
+
+            # ── Tabela de issues ──────────────────────────────────────────
+            sec_hdr("Cards com Deteccoes")
+            _linhas_issues = []
+            for _ik in _issues_detectadas:
+                _cr = [r for r in _res_jira if r.chunk.get("issue_key") == _ik]
+                _linhas_issues.append({
+                    "Card": _ik,
+                    "Deteccoes": sum(r.total_deteccoes for r in _cr),
+                    "Alto": "Sim" if any(r.tem_high for r in _cr) else "",
+                    "Secret": "Sim" if any(r.tem_secret for r in _cr) else "",
+                })
+            st.dataframe(pd.DataFrame(_linhas_issues), use_container_width=True, hide_index=True)
+
+            # ── Verificacao de permissao ──────────────────────────────────
+            sec_hdr("Verificar Permissao de Edicao")
+            st.markdown(
+                f'<p style="font-size:12px;color:{TM};margin-bottom:8px;">'
+                'Antes de aplicar qualquer acao de escrita, confirme que seu token tem permissao de edicao no card.</p>',
+                unsafe_allow_html=True,
+            )
+            _col_perm_sel, _col_perm_btn = st.columns([3, 2])
+            with _col_perm_sel:
+                _issue_check = st.selectbox(
+                    "Selecione um card para testar",
+                    _issues_detectadas[:20] if _issues_detectadas else ["—"],
+                    key="jira_perm_issue",
+                    disabled=not _is_real_ac,
+                )
+            with _col_perm_btn:
+                st.markdown("<div style='height:22px'></div>", unsafe_allow_html=True)
+                if st.button(
+                    "Verificar permissao" if _is_real_ac else "Indisponivel no demo",
+                    key="btn_check_perm",
+                    disabled=not _is_real_ac,
+                    use_container_width=True,
+                ):
+                    _perm = _jp.actions.checar_permissao(_issue_check)
+                    if _perm["pode_editar"]:
+                        st.success(f"Permissao confirmada para {_issue_check}: {_perm['mensagem']}")
+                    else:
+                        st.warning(f"Sem permissao em {_issue_check}: {_perm['mensagem']}")
+
+            # ── Escopo e execucao ─────────────────────────────────────────
+            sec_hdr("Escopo e Execucao")
+            _col_esc, _col_exec = st.columns([2, 3])
+            with _col_esc:
+                _alvo = st.radio(
+                    "Aplicar em",
+                    ["Apenas cards com HIGH ou SECRET", "Todos os cards com deteccoes"],
+                    key="jira_action_alvo",
+                    disabled=not _is_real_ac,
+                )
+            with _col_exec:
+                if _modo_atual == "scrub":
+                    st.markdown(f"""
+                    <div style="background:{RBG};border:1px solid {RD};border-radius:8px;
+                      padding:12px 16px;margin-bottom:10px;">
+                      <div style="font-size:12px;font-weight:700;color:{RD};margin-bottom:4px;">
+                        Atencao: Acao Irreversivel
+                      </div>
+                      <div style="font-size:11.5px;color:{TM};line-height:1.5;">
+                        O scrubbing altera o texto diretamente no Jira. O dado original sera perdido.
+                        Carregue o preview antes de aplicar.
+                      </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    _issue_scrub = st.selectbox(
+                        "Card para preview do scrubbing",
+                        _issues_detectadas[:20],
+                        key="jira_scrub_issue",
+                        disabled=not _is_real_ac,
+                    )
+                    if st.button("Carregar Preview do Scrubbing", key="btn_scrub_preview",
+                                 disabled=not _is_real_ac, use_container_width=True):
+                        _chunks_issue = [r for r in _res_jira if r.chunk.get("issue_key") == _issue_scrub]
+                        _prev = _jp.actions.scrub_preview(_issue_scrub, _chunks_issue)
+                        st.session_state.scrub_preview = _prev
+                        st.session_state.scrub_issue_selecionada = _issue_scrub
+
+                    if st.session_state.scrub_preview and st.session_state.scrub_issue_selecionada == (_issue_scrub if _is_real_ac else ""):
+                        sec_hdr(f"Preview — {st.session_state.scrub_issue_selecionada}")
+                        for _pv in st.session_state.scrub_preview:
+                            st.markdown(f"**Campo:** {_pv['campo']}  |  Entidades: {', '.join(_pv['entidades'])}")
+                            _pv_c1, _pv_c2 = st.columns(2, gap="medium")
+                            _pv_c1.markdown(f'<div style="font-size:11px;color:{TM};margin-bottom:2px;font-weight:600;">ANTES</div>'
+                                            f'<div class="anon-panel" style="min-height:60px;max-height:120px;">{_pv["antes"]}</div>',
+                                            unsafe_allow_html=True)
+                            _pv_c2.markdown(f'<div style="font-size:11px;color:{GD};margin-bottom:2px;font-weight:600;">DEPOIS (scrubbed)</div>'
+                                            f'<div class="anon-panel" style="min-height:60px;max-height:120px;border-color:{GD}40;">{_pv["depois"]}</div>',
+                                            unsafe_allow_html=True)
+
+                        _confirmar = st.checkbox(
+                            "Entendi que esta acao e irreversivel e quero aplicar o scrubbing",
+                            key="scrub_confirma",
+                        )
+                        if st.button("Aplicar Scrubbing Agora", key="btn_scrub_aplicar",
+                                     disabled=not (_is_real_ac and _confirmar), use_container_width=True):
+                            _chunks_scrub = [r for r in _res_jira if r.chunk.get("issue_key") == st.session_state.scrub_issue_selecionada]
+                            _acs = _jp.actions.scrub_aplicar(st.session_state.scrub_issue_selecionada, _chunks_scrub)
+                            for _ar in _acs:
+                                if _ar["ok"]:
+                                    st.success(f"{_ar['acao']}: {_ar['mensagem']}")
+                                else:
+                                    st.error(f"{_ar['acao']}: {_ar['mensagem']}")
+                else:
+                    if st.button(
+                        "Aplicar Acoes" if _is_real_ac else "Indisponivel no demo",
+                        key="btn_apply_actions",
+                        disabled=not _is_real_ac,
+                        use_container_width=True,
+                    ):
+                        _ts_now = datetime.now(timezone.utc).isoformat()
+                        _erros: list[str] = []
+                        _ok_count = 0
+                        with st.status("Aplicando acoes...", expanded=True) as _sts:
+                            for _ik in _issues_detectadas:
+                                _cr = [r for r in _res_jira if r.chunk.get("issue_key") == _ik]
+                                if _alvo.startswith("Apenas") and not any(r.tem_high or r.tem_secret for r in _cr):
+                                    continue
+                                for _ar in _jp.actions.aplicar(_ik, _cr, _ts_now, _modo_atual):
+                                    if _ar["ok"]:
+                                        _ok_count += 1
+                                        st.write(f"{_ik}: {_ar['mensagem']}")
+                                    else:
+                                        _erros.append(f"{_ik}: {_ar['mensagem']}")
+                            _sts.update(
+                                label=f"Concluido — {_ok_count} operacoes.",
+                                state="complete" if not _erros else "error",
+                            )
+                        for _e in _erros[:5]:
+                            st.error(_e)
+
+    # ── Agendamentos ──────────────────────────────────────────────────────────
+    with tab_agend:
+        from plugins.scheduler import ScanScheduler as _SS, FREQ_CRON, DIA_SEMANA_NUM, _cron_para_descricao
+        _sched = get_scheduler()
+        _jp_ag = st.session_state.jira_plugin
+
+        if not _sched.disponivel:
+            st.warning("APScheduler nao instalado. Execute: `pip install apscheduler>=3.10`")
+
+        sec_hdr("Criar Agendamento")
+        _ag_col1, _ag_col2 = st.columns(2, gap="large")
+        with _ag_col1:
+            _ag_nome = st.text_input("Nome do agendamento", placeholder="Scan semanal PROJ", key="ag_nome")
+            _ag_tipo = st.radio("Tipo", ["Jira", "Confluence"], horizontal=True, key="ag_tipo")
+
+            _ag_projs_disp = [p["key"] for p in (st.session_state.jira_projetos or JIRA_DEMO_PROJETOS)]
+            _ag_proj_op = st.multiselect(
+                "Projetos (vazio = todos)",
+                _ag_projs_disp,
+                key="ag_projetos",
+                help="Deixe em branco para incluir todos os projetos acessiveis.",
+            )
+            _ag_acao = st.selectbox(
+                "Acao automatica apos scan",
+                ["readonly", "properties", "label", "comment"],
+                key="ag_acao",
+                help="properties: invisivel | label: etiqueta | comment: historico publico",
+            )
+
+        with _ag_col2:
+            _ag_freq = st.radio(
+                "Frequencia",
+                ["Diario", "Semanal", "Mensal", "Personalizado"],
+                key="ag_freq",
+            )
+            _ag_hora = st.number_input("Hora (0-23)", value=8, min_value=0, max_value=23, key="ag_hora")
+            _ag_min = st.number_input("Minuto (0-59)", value=0, min_value=0, max_value=59, key="ag_min")
+
+            if _ag_freq == "Semanal":
+                _ag_dia = st.selectbox(
+                    "Dia da semana",
+                    list(DIA_SEMANA_NUM.keys()),
+                    key="ag_dia_sem",
+                )
+                _ag_cron = f"{_ag_min} {_ag_hora} * * {DIA_SEMANA_NUM[_ag_dia]}"
+            elif _ag_freq == "Mensal":
+                _ag_dia_mes = st.number_input("Dia do mes (1-28)", value=1, min_value=1, max_value=28, key="ag_dia_mes")
+                _ag_cron = f"{_ag_min} {_ag_hora} {_ag_dia_mes} * *"
+            elif _ag_freq == "Personalizado":
+                _ag_cron = st.text_input(
+                    "Expressao cron (min hora dia mes dia_sem)",
+                    value="0 8 * * 1",
+                    key="ag_cron_custom",
+                )
+            else:
+                _ag_cron = f"{_ag_min} {_ag_hora} * * *"
+
+            st.markdown(
+                f'<p style="font-size:11px;color:{TM};margin-top:4px;">'
+                f'Agenda: <b>{_cron_para_descricao(_ag_cron)}</b></p>',
+                unsafe_allow_html=True,
+            )
+
+            _ag_url = ""
+            _ag_user = ""
+            _ag_token_field = ""
+            if _is_real_ac:
+                with st.expander("Credenciais para execucao agendada"):
+                    _ag_url = st.text_input("URL Jira", key="ag_url")
+                    _ag_user = st.text_input("Email", key="ag_user")
+                    _ag_token_field = st.text_input("Token", type="password", key="ag_token")
+                    st.caption("As credenciais sao armazenadas localmente em SQLite para execucao automatica.")
+
+        if st.button("Criar Agendamento", use_container_width=True, key="btn_criar_ag"):
+            if not _ag_nome.strip():
+                st.warning("Informe um nome para o agendamento.")
+            elif not _sched.disponivel:
+                st.error("Instale o APScheduler para habilitar agendamentos.")
+            else:
+                _sched.criar(
+                    nome=_ag_nome.strip(),
+                    tipo=_ag_tipo.lower(),
+                    projetos=_ag_proj_op,
+                    cron=_ag_cron,
+                    url=_ag_url,
+                    usuario=_ag_user,
+                    token=_ag_token_field,
+                    auto_acao=_ag_acao,
+                )
+                st.success(f"Agendamento '{_ag_nome}' criado: {_cron_para_descricao(_ag_cron)}")
+                st.rerun()
+
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        sec_hdr("Agendamentos Ativos")
+        _jobs = _sched.listar()
+        if not _jobs:
+            st.markdown(f'<p style="color:{TMU};font-size:13px;">Nenhum agendamento criado ainda.</p>', unsafe_allow_html=True)
+        else:
+            for _job in _jobs:
+                _prox = _sched.proximo_run(_job["id"])
+                _ult = _job["ultimo_run"][:16].replace("T", " ") if _job["ultimo_run"] else "nunca"
+                _projs_txt = ", ".join(_job["projetos"]) if _job["projetos"] else "todos"
+                _status_cor = GD if _job["ativo"] else TMU
+
+                _jcol1, _jcol2, _jcol3, _jcol4 = st.columns([3, 2, 2, 1])
+                _jcol1.markdown(
+                    f'<span style="font-size:13px;font-weight:700;color:{TD};">{_job["nome"]}</span><br>'
+                    f'<span style="font-size:11px;color:{TM};">{_job["descricao_freq"]} | projetos: {_projs_txt}</span>',
+                    unsafe_allow_html=True,
+                )
+                _jcol2.markdown(
+                    f'<span style="font-size:11px;color:{TM};">Proximo run</span><br>'
+                    f'<span style="font-size:12px;color:{TD};">{_prox}</span>',
+                    unsafe_allow_html=True,
+                )
+                _jcol3.markdown(
+                    f'<span style="font-size:11px;color:{TM};">Ultimo run</span><br>'
+                    f'<span style="font-size:12px;color:{TD};">{_ult}</span>',
+                    unsafe_allow_html=True,
+                )
+                with _jcol4:
+                    if st.button("Remover", key=f"del_job_{_job['id']}", use_container_width=True):
+                        _sched.remover(_job["id"])
+                        st.rerun()
+
+        # Resultados de execucoes agendadas
+        _hist_ag = _sched.listar_resultados(limit=10)
+        if _hist_ag:
+            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+            sec_hdr("Historico de Execucoes Agendadas")
+            _df_hist = pd.DataFrame([{
+                "Agendamento": h["schedule_nome"],
+                "Executado em": h["executado_em"][:16].replace("T", " "),
+                "Deteccoes": h["total_deteccoes"],
+                "Secrets": h["total_secrets"],
+                "Score": f"{h['compliance_score']}%",
+            } for h in _hist_ag])
+            st.dataframe(_df_hist, use_container_width=True, hide_index=True)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# PAGINA 3 — DESEMPENHO REGIONAL
+# PAGINA: VARREDURA CONFLUENCE
 # ═════════════════════════════════════════════════════════════════════════════
-elif pagina == "Desempenho Regional":
+elif pagina == "Varredura Confluence":
+    from plugins import ConfluencePlugin, ScanStateStore
+    from plugins.scanner import scan_chunks, resumir
+    from plugins.demo_data import CONFLUENCE_DEMO_TRECHOS, CONFLUENCE_DEMO_SPACES
 
-    col_r1, col_r2 = st.columns(2, gap="large")
-
-    # Barras verticais por Regiao e Unidade
-    with col_r1:
-        secao_titulo("Faturamento por Região", "Comparativo entre unidades de negócio")
-        df_ru = (
-            df.groupby(["Regiao", "Unidade_Negocio"], as_index=False)
-              .agg(Receita=("Receita", "sum"))
-        )
-        fig_ru = px.bar(
-            df_ru,
-            x="Regiao", y=(df_ru["Receita"] / 1_000).round(0),
-            color="Unidade_Negocio",
-            barmode="group",
-            color_discrete_sequence=CHART_COLORS,
-            labels={"y": "Faturamento (R$ mil)", "Regiao": "Região", "Unidade_Negocio": "Unidade"},
-            template="none",
-        )
-        fig_ru = aplicar_layout_plotly(fig_ru, height=340)
-        fig_ru.update_traces(marker_line_width=0)
-        fig_ru.update_yaxes(tickformat=",.0f", title_text="R$ mil")
-        container_grafico(lambda: st.plotly_chart(fig_ru, use_container_width=True))
-
-    # Margem media por regiao
-    with col_r2:
-        secao_titulo("Margem Bruta Média por Região", "Eficiência percentual — período filtrado")
-        df_mg = (
-            df.groupby("Regiao", as_index=False)
-              .agg(Margem=("Margem_Pct", "mean"))
-              .sort_values("Margem", ascending=False)
-        )
-        fig_mg = px.bar(
-            df_mg,
-            x="Regiao", y=df_mg["Margem"].round(1),
-            color=df_mg["Margem"].round(1),
-            color_continuous_scale=[[0, BLUE_LIGHT], [1, BLUE_DARK]],
-            labels={"y": "Margem Bruta (%)", "Regiao": ""},
-            template="none",
-        )
-        fig_mg.update_coloraxes(showscale=False)
-        fig_mg = aplicar_layout_plotly(fig_mg, height=340)
-        fig_mg.update_traces(marker_line_width=0)
-        fig_mg.update_yaxes(ticksuffix="%", title_text="Margem (%)")
-        container_grafico(lambda: st.plotly_chart(fig_mg, use_container_width=True))
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # Heatmap: Mes x Regiao
-    secao_titulo(
-        "Mapa de Calor — Faturamento por Período e Região",
-        "Intensidade de cor proporcional ao volume (R$ mil)"
+    _ctab_conn, _ctab_scan, _ctab_res, _ctab_agend = st.tabs(
+        ["Conexao", "Scan", "Resultados", "Agendamentos"]
     )
 
-    df_heat = (
-        df.groupby(["Periodo", "Data", "Regiao"], as_index=False)
-          .agg(Receita=("Receita", "sum"))
-          .sort_values("Data")
-    )
-    pivot = df_heat.pivot_table(
-        index="Regiao", columns="Periodo", values="Receita", aggfunc="sum"
-    ) / 1_000
+    # ── Conexao ───────────────────────────────────────────────────────────────
+    with _ctab_conn:
+        _cp_state = st.session_state.confluence_plugin
+        if _cp_state is not None:
+            if _cp_state == "demo":
+                st.info("Modo Demo ativo. Usando dados simulados.")
+            else:
+                st.success("Conectado ao Confluence.")
+            if st.button("Desconectar", key="conf_desconect"):
+                st.session_state.confluence_plugin = None
+                st.session_state.confluence_spaces = []
+                st.rerun()
+        else:
+            st.markdown(f'<p style="font-size:13px;color:{TM};">Sem credenciais, explore com o modo Demo.</p>', unsafe_allow_html=True)
+            with st.form("conf_conn"):
+                url = st.text_input("URL do Confluence", placeholder="https://empresa.atlassian.net")
+                usuario = st.text_input("Email / Usuario")
+                token = st.text_input("Token de API", type="password")
+                cloud = st.checkbox("Confluence Cloud", value=True)
+                c1, c2 = st.columns(2)
+                conectar = c1.form_submit_button("Conectar", use_container_width=True)
+                demo = c2.form_submit_button("Usar Demo (sem credenciais)", use_container_width=True)
 
-    colunas_ord = (
-        df_heat[["Data","Periodo"]].drop_duplicates()
-          .sort_values("Data")["Periodo"]
-          .tolist()
-    )
-    pivot = pivot[[c for c in colunas_ord if c in pivot.columns]]
+            if conectar and url and usuario and token:
+                _cp = ConfluencePlugin()
+                _res_cp = _cp.conectar(url, usuario, token, cloud)
+                if _res_cp["ok"]:
+                    st.session_state.confluence_plugin = _cp
+                    st.success(_res_cp["mensagem"])
+                    st.rerun()
+                else:
+                    st.error(_res_cp["mensagem"])
+            if demo:
+                st.session_state.confluence_plugin = "demo"
+                st.session_state.confluence_spaces = CONFLUENCE_DEMO_SPACES
+                st.rerun()
 
-    fig_heat = go.Figure(go.Heatmap(
-        z=pivot.values.round(0),
-        x=pivot.columns.tolist(),
-        y=pivot.index.tolist(),
-        colorscale=[[0, BLUE_PALE], [0.5, BLUE_ROYAL], [1, BLUE_DARK]],
-        hovertemplate="<b>%{y}</b> — %{x}<br>R$ %{z:,.0f}K<extra></extra>",
-        showscale=True,
-        colorbar=dict(
-            title=dict(text="R$ mil", font=dict(size=11, color=TEXT_MID)),
-            tickfont=dict(size=10, color=TEXT_MID),
-            len=0.8,
-        ),
-    ))
-    fig_heat = aplicar_layout_plotly(fig_heat, height=280)
-    fig_heat.update_layout(
-        legend=dict(visible=False),
-        xaxis=dict(tickangle=-35),
-    )
-    container_grafico(lambda: st.plotly_chart(fig_heat, use_container_width=True))
+    # ── Scan ──────────────────────────────────────────────────────────────────
+    with _ctab_scan:
+        _cstore = ScanStateStore()
+        _is_demo_c = st.session_state.confluence_plugin == "demo"
+        _is_real_c = st.session_state.confluence_plugin not in (None, "demo")
 
-    botao_exportar(df, "desempenho_regional_filtrado.csv")
+        if st.session_state.confluence_plugin is None:
+            st.warning("Conecte ao Confluence na aba Conexao para executar a varredura.")
+            st.stop()
+
+        if _is_demo_c:
+            st.info("Modo Demo — usando dados fictícios de Confluence.")
+
+        # ── Listagem de spaces ─────────────────────────────────────────────
+        sec_hdr("Spaces Disponiveis")
+
+        _spaces = st.session_state.confluence_spaces
+        _cload_col, _cinfo_col = st.columns([2, 5])
+        with _cload_col:
+            _lbl_cs = "Atualizar lista" if _spaces else "Carregar Spaces"
+            if st.button(_lbl_cs, use_container_width=True, key="btn_load_spaces"):
+                if _is_demo_c:
+                    st.session_state.confluence_spaces = CONFLUENCE_DEMO_SPACES
+                else:
+                    with st.spinner("Buscando spaces e contando paginas (paralelo)..."):
+                        st.session_state.confluence_spaces = (
+                            st.session_state.confluence_plugin.listar_spaces()
+                        )
+                st.rerun()
+        with _cinfo_col:
+            if _spaces:
+                _total_pags = sum(s.get("count", 0) for s in _spaces if s.get("count", 0) > 0)
+                st.markdown(
+                    f'<p style="font-size:12px;color:{TM};padding-top:8px;">'
+                    f'{len(_spaces)} spaces — {_total_pags:,} paginas no total</p>',
+                    unsafe_allow_html=True,
+                )
+
+        if _spaces:
+            # Re-use project table renderer with "Space" label
+            _spaces_rows = [{"Chave": s["key"], "Nome": s["name"], "Paginas": s.get("count", 0)} for s in _spaces]
+            _max_c = max((s.get("count", 0) for s in _spaces), default=1) or 1
+            _bar_rows = []
+            for _sr in _spaces_rows:
+                _cnt = _sr["Paginas"]
+                _bar_len = round((_cnt / _max_c) * 12)
+                _bar = "█" * _bar_len + "░" * (12 - _bar_len)
+                _bar_rows.append({**_sr, "Volume": f"{_bar} {_cnt}"})
+            st.dataframe(pd.DataFrame(_bar_rows), use_container_width=True, hide_index=True)
+
+            st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+            sec_hdr("Selecionar Spaces para Varrer")
+
+            _csel_modo = st.radio(
+                "Escopo",
+                ["Todos os spaces acessiveis", "Selecionar spaces especificos"],
+                horizontal=True,
+                key="conf_selecao_modo",
+            )
+
+            if _csel_modo == "Selecionar spaces especificos":
+                _todas_chaves_c = [s["key"] for s in _spaces]
+                _selecionados_c = st.multiselect(
+                    "Spaces",
+                    options=_todas_chaves_c,
+                    default=st.session_state.confluence_spaces_selecionados or _todas_chaves_c[:1],
+                    format_func=lambda k: f"{k} — {next((s['name'] for s in _spaces if s['key'] == k), k)}",
+                    key="conf_multiselect",
+                )
+                st.session_state.confluence_spaces_selecionados = _selecionados_c
+                _tot_sel_c = sum(s.get("count", 0) for s in _spaces if s["key"] in _selecionados_c and s.get("count", 0) > 0)
+                if _selecionados_c:
+                    st.markdown(
+                        f'<p style="font-size:11px;color:{TM};">Estimativa: ~{_tot_sel_c:,} paginas nos spaces selecionados</p>',
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.session_state.confluence_spaces_selecionados = []
+                _tot_c_todos = sum(s.get("count", 0) for s in _spaces if s.get("count", 0) > 0)
+                if _tot_c_todos > 3000:
+                    st.warning(
+                        f"Todos os spaces somam ~{_tot_c_todos:,} paginas. "
+                        "Use scan incremental ou limite de paginas."
+                    )
+
+        sec_hdr("Opcoes de Varredura")
+        _copt1, _copt2 = st.columns(2)
+        with _copt1:
+            _space_ref_key = "_".join(
+                (st.session_state.confluence_spaces_selecionados or ["todos"])[:3]
+            )
+            _ultimo_c = _cstore.last_scan_date_str("confluence", _space_ref_key) if _space_ref_key != "todos" else None
+            _incremental_c = st.checkbox(
+                f"Scan incremental{f' (desde {_ultimo_c})' if _ultimo_c else ' (primeiro scan = completo)'}",
+                value=bool(_ultimo_c),
+                key="conf_incr",
+            )
+            _max_pag = st.number_input("Limite de paginas por space (0 = sem limite)", value=200, step=50, min_value=0, key="conf_max")
+        with _copt2:
+            _status_pag = st.selectbox("Status das paginas", ["current", "draft", "archived"], key="conf_status")
+            _incluir_anx_c = st.checkbox("Incluir anexos", value=False, key="conf_anexos")
+
+        if st.button("Executar Varredura Confluence", use_container_width=True, key="btn_conf_scan"):
+            _analyzer_c = get_analyzer()
+            _chunks_c: list = []
+            _spaces_para_scan = st.session_state.confluence_spaces_selecionados or [""]
+
+            with st.status("Executando varredura Confluence...", expanded=True) as _cstatus:
+                if _is_demo_c:
+                    st.write(f"Modo demo: {len(CONFLUENCE_DEMO_TRECHOS)} chunks carregados.")
+                    _chunks_c = list(CONFLUENCE_DEMO_TRECHOS)
+                else:
+                    _plugin_conf: ConfluencePlugin = st.session_state.confluence_plugin
+                    _desde_c = _cstore.last_scan_date_str("confluence", _space_ref_key) if _incremental_c and _space_ref_key != "todos" else ""
+                    _total_pags_count = 0
+
+                    for _skey in _spaces_para_scan:
+                        _label_space = _skey or "todos os spaces"
+                        st.write(f"Buscando paginas — space: {_label_space}...")
+                        _paginas = _plugin_conf.buscar_paginas(
+                            _skey,
+                            status=_status_pag,
+                            desde=_desde_c,
+                            max_total=int(_max_pag),
+                        )
+                        st.write(f"  {len(_paginas)} paginas. Extraindo texto...")
+                        _total_pags_count += len(_paginas)
+                        for _pg in _paginas:
+                            _chunks_c.extend(_plugin_conf.extrair_textos(_pg))
+
+                        if _incluir_anx_c and _paginas:
+                            from plugins.attachment_scanner import escanear_anexos
+                            _pares_c: list = []
+                            for _pg in _paginas:
+                                _pid = _pg.get("id", "")
+                                if not _pid:
+                                    continue
+                                for _att in _plugin_conf.listar_anexos(_pid):
+                                    try:
+                                        _pares_c.append((_att, _plugin_conf.baixar_anexo(_att.url_download)))
+                                    except Exception:
+                                        pass
+                            if _pares_c:
+                                st.write(f"  Escaneando {len(_pares_c)} anexos...")
+                                _ra_list = escanear_anexos(_pares_c, _analyzer_c)
+                                for _ra in _ra_list:
+                                    if _ra.resultado:
+                                        _chunks_c.append(_ra.resultado.chunk)
+
+                    if _space_ref_key != "todos":
+                        _cstore.set_last_scan("confluence", _space_ref_key, total_items=_total_pags_count)
+
+                st.write(f"Processando {len(_chunks_c)} chunks em paralelo...")
+                _res_c = scan_chunks(_chunks_c, _analyzer_c)
+                _met_c = resumir(_res_c)
+                st.session_state.confluence_resultados = _res_c
+                st.session_state.confluence_metricas = _met_c
+                _add_history("Confluence", "+".join(_spaces_para_scan[:3]) or "demo", _met_c)
+                _cstatus.update(label=f"Concluido — {_met_c['total_deteccoes']} deteccoes.", state="complete")
+
+    # ── Resultados ────────────────────────────────────────────────────────────
+    with _ctab_res:
+        render_resultados(
+            st.session_state.confluence_resultados,
+            st.session_state.confluence_metricas,
+            "Confluence",
+        )
+
+    # ── Agendamentos ──────────────────────────────────────────────────────────
+    with _ctab_agend:
+        from plugins.scheduler import ScanScheduler as _SS2, FREQ_CRON as _FC2, DIA_SEMANA_NUM as _DSN2, _cron_para_descricao as _cpd2
+        _sched_c = get_scheduler()
+
+        if not _sched_c.disponivel:
+            st.warning("APScheduler nao instalado. Execute: `pip install apscheduler>=3.10`")
+
+        sec_hdr("Criar Agendamento Confluence")
+        _cag1, _cag2 = st.columns(2, gap="large")
+        with _cag1:
+            _cag_nome = st.text_input("Nome do agendamento", placeholder="Scan semanal DS", key="cag_nome")
+            _spaces_disp = [s["key"] for s in (st.session_state.confluence_spaces or CONFLUENCE_DEMO_SPACES)]
+            _cag_spaces = st.multiselect(
+                "Spaces (vazio = todos)",
+                _spaces_disp,
+                key="cag_spaces",
+                help="Deixe em branco para incluir todos os spaces acessiveis.",
+            )
+
+        with _cag2:
+            _cag_freq = st.radio(
+                "Frequencia",
+                ["Diario", "Semanal", "Mensal", "Personalizado"],
+                key="cag_freq",
+            )
+            _cag_hora = st.number_input("Hora (0-23)", value=9, min_value=0, max_value=23, key="cag_hora")
+            _cag_min = st.number_input("Minuto (0-59)", value=0, min_value=0, max_value=59, key="cag_min")
+
+            if _cag_freq == "Semanal":
+                _cag_dia = st.selectbox("Dia da semana", list(_DSN2.keys()), key="cag_dia")
+                _cag_cron = f"{_cag_min} {_cag_hora} * * {_DSN2[_cag_dia]}"
+            elif _cag_freq == "Mensal":
+                _cag_dm = st.number_input("Dia do mes (1-28)", value=1, min_value=1, max_value=28, key="cag_dm")
+                _cag_cron = f"{_cag_min} {_cag_hora} {_cag_dm} * *"
+            elif _cag_freq == "Personalizado":
+                _cag_cron = st.text_input("Expressao cron", value="0 9 * * 1", key="cag_cron_custom")
+            else:
+                _cag_cron = f"{_cag_min} {_cag_hora} * * *"
+
+            st.markdown(
+                f'<p style="font-size:11px;color:{TM};margin-top:4px;">'
+                f'Agenda: <b>{_cpd2(_cag_cron)}</b></p>',
+                unsafe_allow_html=True,
+            )
+
+        if st.button("Criar Agendamento Confluence", use_container_width=True, key="btn_criar_ag_conf"):
+            if not _cag_nome.strip():
+                st.warning("Informe um nome para o agendamento.")
+            elif not _sched_c.disponivel:
+                st.error("Instale o APScheduler para habilitar agendamentos.")
+            else:
+                _sched_c.criar(
+                    nome=_cag_nome.strip(),
+                    tipo="confluence",
+                    projetos=_cag_spaces,
+                    cron=_cag_cron,
+                    url="",
+                    usuario="",
+                    token="",
+                    auto_acao="readonly",
+                )
+                st.success(f"Agendamento '{_cag_nome}' criado: {_cpd2(_cag_cron)}")
+                st.rerun()
+
+        sec_hdr("Agendamentos Ativos")
+        _jobs_c = [j for j in _sched_c.listar() if j.get("tipo") == "confluence"]
+        if not _jobs_c:
+            st.markdown(f'<p style="color:{TMU};font-size:13px;">Nenhum agendamento Confluence criado ainda.</p>', unsafe_allow_html=True)
+        else:
+            for _jc in _jobs_c:
+                _prox_c = _sched_c.proximo_run(_jc["id"])
+                _ult_c = _jc["ultimo_run"][:16].replace("T", " ") if _jc["ultimo_run"] else "nunca"
+                _sp_txt = ", ".join(_jc["projetos"]) if _jc["projetos"] else "todos"
+                _jcc1, _jcc2, _jcc3, _jcc4 = st.columns([3, 2, 2, 1])
+                _jcc1.markdown(
+                    f'<span style="font-size:13px;font-weight:700;color:{TD};">{_jc["nome"]}</span><br>'
+                    f'<span style="font-size:11px;color:{TM};">{_jc["descricao_freq"]} | spaces: {_sp_txt}</span>',
+                    unsafe_allow_html=True,
+                )
+                _jcc2.markdown(f'<span style="font-size:11px;color:{TM};">Proximo run</span><br><span style="font-size:12px;color:{TD};">{_prox_c}</span>', unsafe_allow_html=True)
+                _jcc3.markdown(f'<span style="font-size:11px;color:{TM};">Ultimo run</span><br><span style="font-size:12px;color:{TD};">{_ult_c}</span>', unsafe_allow_html=True)
+                with _jcc4:
+                    if st.button("Remover", key=f"del_cjob_{_jc['id']}", use_container_width=True):
+                        _sched_c.remover(_jc["id"])
+                        st.rerun()
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# PAGINA 4 — EXPLORADOR DE DADOS
+# PAGINA: TEXTO LIVRE
 # ═════════════════════════════════════════════════════════════════════════════
-elif pagina == "Explorador de Dados":
+elif pagina == "Texto Livre":
+    from plugins.scanner import scan_chunks, resumir
 
-    # Estatisticas descritivas
-    secao_titulo("Estatísticas Descritivas", "Variáveis quantitativas do período selecionado")
+    st.markdown(f'<p style="font-size:13px;color:{TM};margin-bottom:1rem;">Cole qualquer texto para detectar PII e secrets antes de enviar para um LLM.</p>', unsafe_allow_html=True)
 
-    colunas_stat = ["Receita", "Meta", "Margem_Pct", "Clientes_Ativos", "Negociacoes", "Atingimento_Pct"]
-    df_stat = df[colunas_stat].describe().T.round(2)
-    df_stat.index.name = "Variável"
-    df_stat = df_stat.rename(columns={
-        "count": "Registros", "mean": "Média", "std": "Desvio Padrão",
-        "min": "Mínimo", "25%": "Percentil 25", "50%": "Mediana",
-        "75%": "Percentil 75", "max": "Máximo",
-    })
-    st.dataframe(df_stat, use_container_width=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # Tabela completa
-    secao_titulo(
-        "Base de Dados Completa",
-        f"{len(df):,} registros correspondentes aos filtros aplicados"
+    texto = st.text_area(
+        "Texto para analise",
+        height=200,
+        placeholder="Cole aqui o texto a ser analisado...",
+        key="texto_livre_input",
     )
 
-    col_ord, col_dir, _ = st.columns([2, 2, 4])
-    with col_ord:
-        col_sort = st.selectbox(
-            "Ordenar por",
-            options=["Receita", "Meta", "Margem_Pct", "Clientes_Ativos", "Atingimento_Pct", "Data"],
-            index=0,
-            key="sort_col",
+    if st.button("Analisar Texto", use_container_width=False):
+        if not texto.strip():
+            st.warning("Insira um texto para analisar.")
+        else:
+            analyzer = get_analyzer()
+            chunk = {
+                "texto": texto, "autor": "usuario", "campo": "Texto Livre",
+                "issue_key": "TEXTO", "issue_url": "", "issue_type": "text", "prioridade": "",
+            }
+            with st.spinner("Analisando..."):
+                resultados = scan_chunks([chunk], analyzer)
+                metricas = resumir(resultados)
+                st.session_state.texto_resultados = resultados
+                st.session_state.texto_metricas = metricas
+            _add_history("Texto", "livre", metricas)
+
+    render_resultados(
+        st.session_state.texto_resultados,
+        st.session_state.texto_metricas,
+        "Texto Livre",
+    )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PAGINA: ANONYMIZAR
+# ═════════════════════════════════════════════════════════════════════════════
+elif pagina == "Anonymizar":
+    from presidio_anonymizer import AnonymizerEngine
+
+    st.markdown(f'<p style="font-size:13px;color:{TM};margin-bottom:1rem;">Substitui PII detectada por tokens — texto limpo para ingestão em LLM.</p>', unsafe_allow_html=True)
+
+    texto_anon = st.text_area(
+        "Texto original",
+        height=160,
+        placeholder="Cole o texto a ser anonimizado...",
+        key="anon_input",
+    )
+
+    if st.button("Anonimizar", use_container_width=False):
+        if not texto_anon.strip():
+            st.warning("Insira um texto.")
+        else:
+            analyzer = get_analyzer()
+            anonymizer = AnonymizerEngine()
+            with st.spinner("Anonimizando..."):
+                results = analyzer.analyze(text=texto_anon, language="pt")
+                anon_result = anonymizer.anonymize(text=texto_anon, analyzer_results=results)
+            st.session_state["anon_texto_original"] = texto_anon
+            st.session_state["anon_texto_limpo"] = anon_result.text
+            st.session_state["anon_itens"] = anon_result.items
+
+    if "anon_texto_limpo" in st.session_state:
+        c1, c2 = st.columns(2, gap="large")
+        with c1:
+            sec_hdr("Original")
+            st.markdown(f'<div class="anon-panel">{st.session_state["anon_texto_original"]}</div>', unsafe_allow_html=True)
+        with c2:
+            sec_hdr("Anonimizado")
+            st.markdown(f'<div class="anon-panel">{st.session_state["anon_texto_limpo"]}</div>', unsafe_allow_html=True)
+
+        st.download_button(
+            "Baixar texto limpo (.txt)",
+            st.session_state["anon_texto_limpo"].encode("utf-8"),
+            file_name="texto_anonimizado.txt",
+            mime="text/plain",
         )
-    with col_dir:
-        ordem_asc = st.radio(
-            "Direção",
-            options=["Decrescente", "Crescente"],
-            horizontal=True,
-            key="sort_dir",
+
+        sec_hdr("Substituicoes Realizadas")
+        if st.session_state["anon_itens"]:
+            rows = []
+            for item in st.session_state["anon_itens"]:
+                original = st.session_state["anon_texto_original"][item.start:item.end]
+                from plugins.scanner import SECRET_ENTITIES
+                valor_display = (original[:4] + "..." + original[-4:] if len(original) > 8 else "****") if item.entity_type in SECRET_ENTITIES else original
+                rows.append({
+                    "Entidade": item.entity_type,
+                    "Valor Original": valor_display,
+                    "Substituido Por": item.text,
+                    "Inicio": item.start,
+                    "Fim": item.end,
+                })
+            df_anon = pd.DataFrame(rows)
+            st.dataframe(df_anon, use_container_width=True, hide_index=True)
+
+            buf = io.BytesIO()
+            with pd.ExcelWriter(buf, engine="openpyxl") as w:
+                df_anon.to_excel(w, index=False, sheet_name="Substituicoes")
+            col_d1, col_d2, _ = st.columns([2, 2, 4])
+            col_d1.download_button("Exportar CSV", df_anon.to_csv(index=False).encode(), "substituicoes.csv", "text/csv", use_container_width=True)
+            col_d2.download_button("Exportar Excel", buf.getvalue(), "substituicoes.xlsx", use_container_width=True)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PAGINA: FRAMEWORKS
+# ═════════════════════════════════════════════════════════════════════════════
+elif pagina == "Frameworks":
+    from plugins.frameworks import AI_FRAMEWORKS, NIVEL_COR, NIVEL_LABELS
+
+    st.markdown(f'<p style="font-size:13px;color:{TM};margin-bottom:1.5rem;">Catalogo de frameworks regulatórios e de AI Security mapeados às entidades detectadas.</p>', unsafe_allow_html=True)
+
+    for nome, fw in AI_FRAMEWORKS.items():
+        cor_nivel = NIVEL_COR.get(fw["nivel_impacto"], OD)
+        label_nivel = NIVEL_LABELS.get(fw["nivel_impacto"], fw["nivel_impacto"])
+        funcoes_html = " ".join(
+            f'<span style="background:rgba(59,130,246,.1);border:1px solid {BOR};'
+            f'border-radius:4px;padding:2px 8px;font-size:11px;color:{BR};'
+            f'font-weight:500;margin-right:4px;">{f}</span>'
+            for f in fw["funcoes"]
         )
+        acoes_html = "".join(f'<li style="margin-bottom:4px;">{a}</li>' for a in fw["acoes"])
 
-    df_view = df.sort_values(col_sort, ascending=(ordem_asc == "Crescente")).reset_index(drop=True)
-
-    colunas_exib = st.multiselect(
-        "Colunas visíveis",
-        options=df_view.columns.tolist(),
-        default=["Data", "Periodo", "Regiao", "Unidade_Negocio",
-                 "Receita", "Meta", "Margem_Pct", "Clientes_Ativos",
-                 "Negociacoes", "Atingimento_Pct"],
-        key="cols_exib",
-    )
-
-    st.dataframe(
-        df_view[colunas_exib] if colunas_exib else df_view,
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    botao_exportar(df_view, "explorador_dados_filtrado.csv")
-
-    # Nota de rodape
-    st.markdown(f"""
-    <div style="background:{BLUE_PALE};border:1px solid #BFDBFE;
-      border-radius:6px;padding:12px 16px;font-size:12px;color:{BLUE_DARK};margin-top:1rem;">
-      <strong>Nota:</strong> Todos os dados exibidos são fictícios e gerados exclusivamente
-      para fins de demonstração. Nenhuma informação real de clientes ou faturamento
-      está representada nesta plataforma.
-    </div>
-    """, unsafe_allow_html=True)
+        st.markdown(f"""
+        <div style="background:{BPW};border:1px solid {BOR};border-left:4px solid {cor_nivel};
+          border-radius:8px;padding:18px 22px;margin-bottom:1rem;">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
+            <span style="font-size:15px;font-weight:700;color:{TD};">{nome}</span>
+            <span style="background:rgba(0,0,0,.2);color:{cor_nivel};border:1px solid {cor_nivel};
+              border-radius:4px;padding:2px 10px;font-size:10px;font-weight:700;">
+              {label_nivel}
+            </span>
+          </div>
+          <div style="margin-bottom:8px;">{funcoes_html}</div>
+          <p style="font-size:12.5px;color:{TM};line-height:1.6;margin:8px 0;">{fw["descricao"]}</p>
+          <div style="font-size:11px;font-weight:700;color:{TMU};text-transform:uppercase;
+            letter-spacing:.5px;margin:10px 0 6px;">Acoes Recomendadas</div>
+          <ul style="margin:0;padding-left:18px;font-size:12px;color:{TM};line-height:1.7;">
+            {acoes_html}
+          </ul>
+        </div>
+        """, unsafe_allow_html=True)

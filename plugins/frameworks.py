@@ -17,6 +17,7 @@ from typing import TypedDict
 # ── Mapeamento PII → Frameworks ──────────────────────────────────────────────
 
 PII_FRAMEWORK_MAP: dict[str, list[str]] = {
+    # PII brasileira
     "CPF": ["LGPD Art.5/11", "GDPR Art.9", "ISO 27701", "ISO 27001"],
     "CNPJ": ["LGPD Art.5", "GDPR Art.4", "ISO 27001"],
     "RG": ["LGPD Art.5/11", "GDPR Art.9", "ISO 27701"],
@@ -24,15 +25,24 @@ PII_FRAMEWORK_MAP: dict[str, list[str]] = {
     "TITULO_ELEITOR": ["LGPD Art.5/11", "GDPR Art.9", "ISO 27701"],
     "CNH": ["LGPD Art.5", "GDPR Art.4", "ISO 27001"],
     "CARTAO_CREDITO": ["PCI-DSS Req.3", "LGPD Art.5", "GDPR Art.4", "ISO 27001"],
+    # PII de contato
     "EMAIL_ADDRESS": ["LGPD Art.5", "GDPR Art.4", "CCPA", "CAN-SPAM"],
     "TELEFONE_BR": ["LGPD Art.5", "GDPR Art.4"],
     "PHONE_NUMBER": ["LGPD Art.5", "GDPR Art.4"],
     "CEP": ["LGPD Art.5", "GDPR Art.4"],
+    # PII contextual
     "PERSON": ["LGPD Art.5", "GDPR Art.4", "ISO 27001"],
     "LOCATION": ["LGPD Art.5", "GDPR Art.4"],
     "ORGANIZATION": ["LGPD Art.5", "GDPR Art.4"],
     "DATE_TIME": ["LGPD Art.5", "GDPR Art.4"],
     "URL": ["LGPD Art.5", "GDPR Art.4"],
+    # Secrets e credenciais — OWASP LLM Top 10
+    "JWT_TOKEN": ["OWASP LLM LLM06", "OWASP LLM LLM01", "NIST AI RMF", "ISO 27001"],
+    "AWS_ACCESS_KEY": ["OWASP LLM LLM06", "MITRE ATLAS AML.T0024", "ISO 27001"],
+    "GITHUB_TOKEN": ["OWASP LLM LLM06", "MITRE ATLAS AML.T0024", "ISO 27001"],
+    "PRIVATE_KEY": ["OWASP LLM LLM06", "PCI-DSS Req.3", "ISO 27001"],
+    "CONNECTION_STRING": ["OWASP LLM LLM06", "LGPD Art.5", "ISO 27001"],
+    "SECRET_IN_CONTEXT": ["OWASP LLM LLM06", "OWASP LLM LLM02", "ISO 27001"],
 }
 
 

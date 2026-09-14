@@ -6,5 +6,8 @@ secondaryBackgroundColor = "#0F1729"
 textColor = "#E2E8F0"
 font = "sans serif"
 
+[client]
+toolbarMode = "minimal"
+
 [server]
 headless = true
