@@ -112,7 +112,7 @@ class ConfluencePlugin:
                     username=usuario,
                     password=token,
                     cloud=cloud,
-                    verify_ssl=cloud,
+                    verify_ssl=False,
                 )
             else:
                 # Server/DC: PAT (Personal Access Token)
