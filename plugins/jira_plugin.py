@@ -82,13 +82,28 @@ class JiraPlugin:
     ) -> ConnResult:
         self._base_url = url.rstrip("/")
         try:
-            self._client = JIRA(
-                server=self._base_url,
-                basic_auth=(usuario, token),
-            )
+            if cloud:
+                # Cloud: email + API token (basic auth)
+                self._client = JIRA(
+                    server=self._base_url,
+                    basic_auth=(usuario, token),
+                )
+            elif usuario:
+                # Server/DC: username + password (legacy / older versions)
+                self._client = JIRA(
+                    server=self._base_url,
+                    basic_auth=(usuario, token),
+                )
+            else:
+                # Server/DC: PAT (Personal Access Token) — Jira Server 8.14+ / Data Center
+                self._client = JIRA(
+                    server=self._base_url,
+                    token_auth=token,
+                )
             me = self._client.myself()
-            display_name = me.get("displayName", usuario)
-            msg = f"Conectado como {display_name}."
+            display_name = me.get("displayName", usuario or "usuario")
+            modo = "Cloud" if cloud else ("Server/PAT" if not usuario else "Server/Senha")
+            msg = f"Conectado como {display_name} [{modo}]."
             logger.info("Jira conectado: %s — %s", self._base_url, msg)
             return ConnResult(ok=True, message=msg)
         except JIRAError as exc:
@@ -101,7 +116,7 @@ class JiraPlugin:
             )
             return ConnResult(ok=False, message=msg)
         except Exception as exc:
-            msg = f"Erro de conexão: {exc}"
+            msg = f"Erro de conexao: {exc}"
             logger.exception("Erro inesperado ao conectar Jira: %s", exc)
             return ConnResult(ok=False, message=msg)
 

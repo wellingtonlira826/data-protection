@@ -102,12 +102,21 @@ class ConfluencePlugin:
         self._base_url = url.rstrip("/")
         self._cloud = cloud
         try:
-            self._client = Confluence(
-                url=self._base_url,
-                username=usuario,
-                password=token,
-                cloud=cloud,
-            )
+            if cloud or usuario:
+                # Cloud (email + API token) or Server/DC with username + password
+                self._client = Confluence(
+                    url=self._base_url,
+                    username=usuario,
+                    password=token,
+                    cloud=cloud,
+                )
+            else:
+                # Server/DC: PAT (Personal Access Token)
+                self._client = Confluence(
+                    url=self._base_url,
+                    token=token,
+                    cloud=False,
+                )
             conexao = self._client.get_spaces(limit=1)
             results = (
                 conexao.get("results", [])

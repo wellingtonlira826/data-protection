@@ -1195,26 +1195,60 @@ elif pagina == "Varredura Jira":
                 st.session_state.jira_projetos = []
                 st.rerun()
         else:
-            st.markdown(f'<p style="font-size:13px;color:{TM};">Conecte ao Jira Cloud ou Server para varredura real. Sem credenciais, explore com o modo Demo.</p>', unsafe_allow_html=True)
+            st.markdown(f'<p style="font-size:13px;color:{TM};">Conecte ao Jira Cloud ou Server/Data Center para varredura real. Sem credenciais, explore com o modo Demo.</p>', unsafe_allow_html=True)
+
+            _jira_tipo = st.radio(
+                "Tipo de instalacao",
+                ["Cloud (Atlassian Cloud)", "Server / Data Center (on-premises)"],
+                horizontal=True,
+                key="jira_tipo_radio",
+                label_visibility="collapsed",
+            )
+            _jira_cloud = (_jira_tipo == "Cloud (Atlassian Cloud)")
+
+            if _jira_cloud:
+                st.markdown(
+                    f'<p style="font-size:12px;color:{TM};margin-bottom:4px;">'
+                    'Cloud: use o email da conta Atlassian + API Token gerado em '
+                    'atlassian.com > Account Settings > Security > API tokens.</p>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    f'<p style="font-size:12px;color:{TM};margin-bottom:4px;">'
+                    'Server/DC: use <b>PAT</b> (Personal Access Token, Jira 8.14+ / Data Center) '
+                    '— deixe o campo Usuario em branco. Para versoes antigas, informe usuario + senha.</p>',
+                    unsafe_allow_html=True,
+                )
+
             with st.form("jira_conn"):
-                url = st.text_input("URL do Jira", placeholder="https://empresa.atlassian.net")
-                usuario = st.text_input("Email / Usuario")
-                token = st.text_input("Token de API", type="password",
-                                      help="Gere em: Atlassian Account > Security > API tokens")
-                cloud = st.checkbox("Jira Cloud", value=True)
+                _ph_url = "https://empresa.atlassian.net" if _jira_cloud else "https://jira.empresa.com.br"
+                url = st.text_input("URL do Jira", placeholder=_ph_url)
+                _lbl_usr = "Email" if _jira_cloud else "Usuario (opcional — deixe em branco para PAT)"
+                usuario = st.text_input(_lbl_usr)
+                _lbl_tok = "Token de API" if _jira_cloud else "PAT ou Senha"
+                _hlp_tok = (
+                    "Gere em: atlassian.com > Account Settings > Security > API tokens"
+                    if _jira_cloud else
+                    "PAT: Jira > menu de usuario > Personal Access Tokens"
+                )
+                token = st.text_input(_lbl_tok, type="password", help=_hlp_tok)
                 c1, c2 = st.columns(2)
                 conectar = c1.form_submit_button("Conectar", use_container_width=True)
                 demo = c2.form_submit_button("Usar Demo (sem credenciais)", use_container_width=True)
 
-            if conectar and url and usuario and token:
-                _p = JiraPlugin()
-                _res = _p.conectar(url, usuario, token, cloud)
-                if _res["ok"]:
-                    st.session_state.jira_plugin = _p
-                    st.success(_res["mensagem"])
-                    st.rerun()
+            if conectar and url and token:
+                if _jira_cloud and not usuario:
+                    st.error("Email obrigatorio para Jira Cloud.")
                 else:
-                    st.error(_res["mensagem"])
+                    _p = JiraPlugin()
+                    _res = _p.conectar(url, usuario, token, _jira_cloud)
+                    if _res["ok"]:
+                        st.session_state.jira_plugin = _p
+                        st.success(_res["message"])
+                        st.rerun()
+                    else:
+                        st.error(_res["message"])
 
             if demo:
                 st.session_state.jira_plugin = "demo"
@@ -1754,25 +1788,59 @@ elif pagina == "Varredura Confluence":
                 st.session_state.confluence_spaces = []
                 st.rerun()
         else:
-            st.markdown(f'<p style="font-size:13px;color:{TM};">Sem credenciais, explore com o modo Demo.</p>', unsafe_allow_html=True)
+            st.markdown(f'<p style="font-size:13px;color:{TM};">Conecte ao Confluence Cloud ou Server/Data Center. Sem credenciais, explore com o modo Demo.</p>', unsafe_allow_html=True)
+
+            _conf_tipo = st.radio(
+                "Tipo de instalacao Confluence",
+                ["Cloud (Atlassian Cloud)", "Server / Data Center (on-premises)"],
+                horizontal=True,
+                key="conf_tipo_radio",
+                label_visibility="collapsed",
+            )
+            _conf_cloud = (_conf_tipo == "Cloud (Atlassian Cloud)")
+
+            if _conf_cloud:
+                st.markdown(
+                    f'<p style="font-size:12px;color:{TM};margin-bottom:4px;">'
+                    'Cloud: email da conta Atlassian + API Token de atlassian.com > Account Settings > Security.</p>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    f'<p style="font-size:12px;color:{TM};margin-bottom:4px;">'
+                    'Server/DC: use <b>PAT</b> (Confluence 7.9+ / Data Center) deixando Usuario em branco, '
+                    'ou informe usuario + senha para versoes anteriores.</p>',
+                    unsafe_allow_html=True,
+                )
+
             with st.form("conf_conn"):
-                url = st.text_input("URL do Confluence", placeholder="https://empresa.atlassian.net")
-                usuario = st.text_input("Email / Usuario")
-                token = st.text_input("Token de API", type="password")
-                cloud = st.checkbox("Confluence Cloud", value=True)
+                _ph_url_c = "https://empresa.atlassian.net" if _conf_cloud else "https://confluence.empresa.com.br"
+                url = st.text_input("URL do Confluence", placeholder=_ph_url_c)
+                _lbl_usr_c = "Email" if _conf_cloud else "Usuario (opcional — deixe em branco para PAT)"
+                usuario = st.text_input(_lbl_usr_c)
+                _lbl_tok_c = "Token de API" if _conf_cloud else "PAT ou Senha"
+                _hlp_tok_c = (
+                    "Gere em: atlassian.com > Account Settings > Security > API tokens"
+                    if _conf_cloud else
+                    "PAT: Confluence > menu de usuario > Personal Access Tokens"
+                )
+                token = st.text_input(_lbl_tok_c, type="password", help=_hlp_tok_c)
                 c1, c2 = st.columns(2)
                 conectar = c1.form_submit_button("Conectar", use_container_width=True)
                 demo = c2.form_submit_button("Usar Demo (sem credenciais)", use_container_width=True)
 
-            if conectar and url and usuario and token:
-                _cp = ConfluencePlugin()
-                _res_cp = _cp.conectar(url, usuario, token, cloud)
-                if _res_cp["ok"]:
-                    st.session_state.confluence_plugin = _cp
-                    st.success(_res_cp["mensagem"])
-                    st.rerun()
+            if conectar and url and token:
+                if _conf_cloud and not usuario:
+                    st.error("Email obrigatorio para Confluence Cloud.")
                 else:
-                    st.error(_res_cp["mensagem"])
+                    _cp = ConfluencePlugin()
+                    _res_cp = _cp.conectar(url, usuario, token, _conf_cloud)
+                    if _res_cp["ok"]:
+                        st.session_state.confluence_plugin = _cp
+                        st.success(_res_cp["message"])
+                        st.rerun()
+                    else:
+                        st.error(_res_cp["message"])
             if demo:
                 st.session_state.confluence_plugin = "demo"
                 st.session_state.confluence_spaces = CONFLUENCE_DEMO_SPACES
