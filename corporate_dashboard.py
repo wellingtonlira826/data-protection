@@ -11,7 +11,11 @@ Execução:
 from __future__ import annotations
 
 import io
+import os
 from datetime import datetime, timezone
+
+# Desabilita telemetria da biblioteca jira-python (nao envia dados para Atlassian)
+os.environ.setdefault("JIRA_INTERNAL_EVENTS_ENABLED", "false")
 
 import pandas as pd
 import plotly.graph_objects as go
